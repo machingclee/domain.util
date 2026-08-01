@@ -20,7 +20,7 @@
         command/query invokers, domain event dispatch, schema-targeted handlers,
         audit hooks, and a built-in command-flow visualization UI.
     </description>
-    <url>https://github.com/machingclee/domain-util</url>
+    <url>https://github.com/machingclee/2026-08-01-domain-util</url>
 
     <licenses>
         <license>
@@ -40,9 +40,9 @@
     </developers>
 
     <scm>
-        <connection>scm:git:git://github.com/machingclee/domain-util.git</connection>
-        <developerConnection>scm:git:ssh://git@github.com/machingclee/domain-util.git</developerConnection>
-        <url>https://github.com/machingclee/domain-util</url>
+        <connection>scm:git:git://github.com/machingclee/2026-08-01-domain-util.git</connection>
+        <developerConnection>scm:git:ssh://git@github.com/machingclee/2026-08-01-domain-util.git</developerConnection>
+        <url>https://github.com/machingclee/2026-08-01-domain-util</url>
         <tag>HEAD</tag>
     </scm>
 
@@ -169,7 +169,7 @@
     </build>
 
     <!--
-      After you create https://github.com/machingclee/domain-util and enable
+      After you create https://github.com/machingclee/2026-08-01-domain-util and enable
       GitHub Packages, uncomment (and use a PAT with write:packages in
       ~/.m2/settings.xml under server id "github"):
 
@@ -177,7 +177,7 @@
         <repository>
             <id>github</id>
             <name>GitHub Packages</name>
-            <url>https://maven.pkg.github.com/machingclee/domain-util</url>
+            <url>https://maven.pkg.github.com/machingclee/2026-08-01-domain-util</url>
         </repository>
     </distributionManagement>
     -->

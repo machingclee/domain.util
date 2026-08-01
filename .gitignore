@@ -1,0 +1,38 @@
+# Build
+target/
+*.class
+*.jar
+*.war
+*.ear
+hs_err_pid*
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Maven
+.mvn/wrapper/maven-wrapper.jar
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+release.properties
+
+# Logs
+*.log
+
+# Frontend (event-storming-frontend)
+event-storming-frontend/node_modules/
+event-storming-frontend/dist/
+*.vsix

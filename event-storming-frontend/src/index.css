@@ -1,0 +1,370 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+    --policy-bg: #58058e9f;
+    --policy-border: #8b6fa3;
+}
+
+body,
+#root {
+    margin: 0;
+    padding: 0;
+    font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell",
+        "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+}
+
+/* React Flow connection handles — hidden in view mode, visible in edit mode */
+.react-flow__handle {
+    opacity: 0;
+    pointer-events: none;
+    width: 12px;
+    height: 12px;
+    background: #3b82f6;
+    border: 2px solid #fff;
+    border-radius: 50%;
+    transition: opacity 0.15s;
+}
+
+.edit-mode .react-flow__handle {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* Push handles to the outer edge of the node border so edges
+   start/end at the visual boundary, not inside the padding */
+.react-flow__handle-left {
+    left: -8px;
+}
+.react-flow__handle-right {
+    right: -8px;
+}
+
+/* ── Modal overlay ── */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+}
+
+.modal-content {
+    background: #1e293b;
+    border: 1px solid #475569;
+    border-radius: 12px;
+    padding: 24px;
+    min-width: 420px;
+    max-width: 560px;
+    color: #f1f5f9;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.modal-content h2 {
+    margin: 0 0 16px 0;
+    font-size: 20px;
+    font-weight: 700;
+}
+
+.modal-content label {
+    display: block;
+    margin-bottom: 10px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #94a3b8;
+}
+
+.modal-content input,
+.modal-content select,
+.modal-content textarea {
+    width: 100%;
+    padding: 8px 10px;
+    background: #0f172a;
+    border: 1px solid #475569;
+    border-radius: 6px;
+    color: #f1f5f9;
+    font-size: 14px;
+    margin-top: 4px;
+    box-sizing: border-box;
+}
+
+.modal-content input:focus,
+.modal-content select:focus,
+.modal-content textarea:focus {
+    outline: none;
+    border-color: #3b82f6;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 20px;
+}
+
+.modal-actions button {
+    padding: 8px 18px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+}
+
+.btn-primary {
+    background: #2563eb;
+    color: #fff;
+}
+.btn-secondary {
+    background: #475569;
+    color: #fff;
+}
+.btn-danger {
+    background: #dc2626;
+    color: #fff;
+}
+
+/* ── Flow canvas search ── */
+.flow-search {
+    position: relative;
+}
+
+.flow-search-filter {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 6px;
+    padding: 0 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #4f46e5;
+}
+
+.flow-search-filter-label {
+    font-weight: 400;
+    color: #94a3b8;
+}
+
+.flow-search-filter-clear {
+    margin-left: 4px;
+    color: #94a3b8;
+    cursor: pointer;
+    transition: color 0.15s ease;
+}
+
+.flow-search-filter-clear:hover {
+    color: #64748b;
+}
+
+.flow-search-input {
+    width: 420px;
+    padding: 10px 16px;
+    background: #fff;
+    border: none;
+    border-radius: 12px;
+    color: #1e293b;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.3;
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+    outline: none;
+    transition:
+        box-shadow 0.15s ease,
+        background 0.15s ease;
+}
+
+.flow-search-input::placeholder {
+    color: #94a3b8;
+    font-weight: 400;
+}
+
+.flow-search-input:hover {
+    box-shadow: 0 4px 18px rgba(15, 23, 42, 0.12);
+}
+
+.flow-search-input:focus {
+    box-shadow:
+        0 0 0 3px rgba(37, 99, 235, 0.15),
+        0 4px 16px rgba(15, 23, 42, 0.1);
+}
+
+/* ── Flow canvas toolbar ── */
+.flow-toolbar {
+    position: absolute;
+    top: 12px;
+    right: 16px;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: flex-end;
+}
+
+.flow-toolbar-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    padding: 6px;
+    background: #fff;
+    border: none;
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+}
+
+.flow-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border-radius: 8px;
+    border: none;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    line-height: 1.2;
+    cursor: pointer;
+    white-space: nowrap;
+    transition:
+        background 0.15s ease,
+        color 0.15s ease,
+        box-shadow 0.15s ease,
+        transform 0.1s ease,
+        opacity 0.15s ease;
+    user-select: none;
+}
+
+.flow-btn:active:not(:disabled) {
+    transform: translateY(1px);
+}
+
+.flow-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.flow-btn-ghost {
+    background: #fff;
+    color: #475569;
+}
+
+.flow-btn-ghost:hover:not(:disabled) {
+    background: #f1f5f9;
+    color: #1e293b;
+}
+
+.flow-btn-edit {
+    background: #fff;
+    color: #64748b;
+    min-width: 132px;
+}
+
+.flow-btn-edit:hover:not(:disabled) {
+    background: #f1f5f9;
+    color: #334155;
+}
+
+.flow-btn-edit.is-on {
+    background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.22);
+}
+
+.flow-btn-edit.is-on:hover:not(:disabled) {
+    background: linear-gradient(135deg, #1e40af 0%, #1d4ed8 100%);
+    color: #fff;
+}
+
+.flow-btn-edit-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #94a3b8;
+}
+
+.flow-btn-edit.is-on .flow-btn-edit-dot {
+    background: #86efac;
+    box-shadow: 0 0 0 3px rgba(134, 239, 172, 0.3);
+}
+
+.flow-btn-accent {
+    background: #fff;
+    color: #2563eb;
+}
+
+.flow-btn-accent:hover:not(:disabled) {
+    background: #eff6ff;
+    color: #1d4ed8;
+}
+
+.flow-btn-danger-ghost {
+    background: #fff;
+    color: #dc2626;
+}
+
+.flow-btn-danger-ghost:hover:not(:disabled) {
+    background: #fef2f2;
+    color: #b91c1c;
+}
+
+/* ── Inline policy editing ── */
+.policy-edit-textarea {
+    width: 100%;
+    min-height: 60px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    color: #fff;
+    font-size: 16px;
+    padding: 6px 8px;
+    resize: vertical;
+    font-family: inherit;
+}
+
+.policy-edit-textarea:focus {
+    outline: none;
+    border-color: #3b82f6;
+}
+
+/* Markdown rendered inside policy invariant cells */
+.markdown-invariant p {
+    margin: 0 0 4px 0;
+}
+
+.markdown-invariant code {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 0.9em;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+.markdown-invariant pre {
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    padding: 8px 12px;
+    overflow-x: auto;
+    margin: 6px 0 0;
+}
+
+.markdown-invariant pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 0.85em;
+}
+
+.markdown-invariant strong {
+    color: #fff;
+}
+
+.markdown-invariant em {
+    opacity: 0.85;
+}
+

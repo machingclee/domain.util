@@ -1,0 +1,42 @@
+# Publish com.machingclee:domain-util to GitHub Packages.
+# Uses the job's GITHUB_TOKEN — no local ~/.m2 credentials required.
+#
+# mvn deploy reads <distributionManagement> in pom.xml and uploads there.
+# Trigger: version tags (v*) or manual "Run workflow".
+
+name: Publish to GitHub Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+          # Maps to pom distributionManagement/repository@id and writes
+          # a temporary settings.xml with GITHUB_TOKEN for deploy auth.
+          server-id: github
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
+
+      - name: Deploy to GitHub Packages
+        run: mvn -B clean deploy -DskipTests
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

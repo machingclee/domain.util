@@ -127,6 +127,32 @@ npm run build
 mvn clean install -DskipTests
 ```
 
+
+## Publish to GitHub Packages
+
+`mvn deploy` uploads artifacts to whatever is configured under
+`<distributionManagement>` in `pom.xml` (here: GitHub Packages for
+`machingclee/domain.util`). It does **not** push git commits; that is still
+`git push`.
+
+Prefer CI so no PAT is stored on a laptop:
+
+1. Push this repo to GitHub (already: `machingclee/domain.util`).
+2. On a release tag, or via **Actions → Publish to GitHub Packages → Run workflow**:
+
+```bash
+git tag v0.1.0-SNAPSHOT
+git push origin v0.1.0-SNAPSHOT
+# or open the workflow_dispatch UI
+```
+
+The workflow `.github/workflows/publish.yml` runs `mvn clean deploy` with
+`GITHUB_TOKEN` (`packages: write`). Local `~/.m2/settings.xml` is optional.
+
+Consumers still need a repository block pointing at
+`https://maven.pkg.github.com/machingclee/domain.util` and a token with
+`read:packages` to download (GitHub usually requires auth even for public packages).
+
 ## Origin
 
 Extracted and rebranded from an internal `domain.util` module used in multi-module Spring Boot services. This repository is the standalone, personal open-source form under `com.machingclee`. Multi-schema routing from that origin was removed in favor of single-pipeline + `@Table`-based persistence.

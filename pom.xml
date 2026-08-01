@@ -169,10 +169,11 @@
     </build>
 
     <!--
-      After you create https://github.com/machingclee/domain.util and enable
-      GitHub Packages, uncomment (and use a PAT with write:packages in
-      ~/.m2/settings.xml under server id "github"):
-
+      Target for `mvn deploy`. Maven uploads the built JAR (and attached
+      sources/javadoc) to this repository — not to git remotes.
+      Publish via GitHub Actions with GITHUB_TOKEN (see .github/workflows/publish.yml)
+      so we do not need a local ~/.m2/settings.xml PAT.
+    -->
     <distributionManagement>
         <repository>
             <id>github</id>
@@ -180,5 +181,4 @@
             <url>https://maven.pkg.github.com/machingclee/domain.util</url>
         </repository>
     </distributionManagement>
-    -->
 </project>

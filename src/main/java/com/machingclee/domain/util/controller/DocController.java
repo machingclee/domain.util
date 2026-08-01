@@ -46,7 +46,10 @@ public class DocController {
 
     private record APIResponseDTO<T>(boolean success, T result) {
 
-        public static <T> APIResponseDTO<T> success(T result) {
+        // Named "ok" — a static factory named "success" collides with the record
+        // accessor success() and crashes Jackson 3 Afterburner (auto-registered by
+        // Spring Boot 4): "Multiple definitions of method success found".
+        public static <T> APIResponseDTO<T> ok(T result) {
             return new APIResponseDTO<>(true, result);
         }
     }
@@ -100,7 +103,7 @@ public class DocController {
         var combinedFlows = new FlowResponseDTO(
                 commands, policies, schema, dtos, queries, queryDtos,
                 factories, factoryDtos, entities, entityDtos);
-        return APIResponseDTO.success(combinedFlows);
+        return APIResponseDTO.ok(combinedFlows);
     }
 
     private static List<FactoryMethodDTO> flattenFactories(List<EntityNodeDTO> entities) {

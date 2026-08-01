@@ -6,7 +6,6 @@ import com.machingclee.domain.util.common.RequestSequence;
 import com.machingclee.domain.util.common.event.enums.DispatchTiming;
 import com.machingclee.domain.util.common.interfaces.AuditEvent;
 import com.machingclee.domain.util.common.interfaces.AuditEventRepository;
-import com.machingclee.domain.util.schema.SchemaIdentifier;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -23,21 +22,29 @@ import org.springframework.transaction.event.TransactionalEventListener;
 import java.util.function.Supplier;
 
 /**
- * Persists domain events for one specific schema.
- * Consumers register one DomainEventLogger bean per schema, e.g.:
+ * Persists domain events using the injected audit repository.
+ * <p>
+ * Physical storage (table name, Postgres schema, datasource) is decided entirely
+ * by the consumer's {@link AuditEvent} entity (e.g. {@code @Table}) and
+ * {@link AuditEventRepository} — not by this library.
+ * <p>
+ * Register one logger bean per application (or per persistence unit you want
+ * events written to):
  *
  * <pre>
  * {@code
- * @Bean
- * public DomainEventLogger salesDomainEventLogger(SalesEventRepository repo,
- *                                                 ApplicationEventPublisher publisher) {
- *     return new DomainEventLogger(repo, SalesEvent::new, SalesSchema.SALES, publisher);
+ * @Component
+ * public class SomeDomainDomainEventLogger extends DomainEventLogger {
+ *     public SomeDomainDomainEventLogger(SomeDomainEventRepository repo,
+ *                                        ApplicationEventPublisher publisher) {
+ *         super(repo, SomeDomainEvent::new, publisher);
+ *     }
  * }
  * }
  * </pre>
  * <p>
- * Each instance filters incoming EventWrapper events by matching
- * EventWrapper.getContext().schemaIdentifier() against its own schemaIdentifier.
+ * Prefer a single logger bean. Multiple logger beans would each receive every
+ * {@link EventWrapper} and may double-write.
  */
 public class DomainEventLogger {
 
@@ -48,17 +55,14 @@ public class DomainEventLogger {
 
     private final AuditEventRepository<AuditEvent> eventRepository;
     private final Supplier<AuditEvent> eventFactory;
-    private final SchemaIdentifier schemaIdentifier;
     private final ApplicationEventPublisher applicationEventPublisher;
 
     @SuppressWarnings("unchecked")
     public DomainEventLogger(AuditEventRepository<? extends AuditEvent> eventRepository,
                              Supplier<? extends AuditEvent> eventFactory,
-                             SchemaIdentifier schemaIdentifier,
                              ApplicationEventPublisher applicationEventPublisher) {
         this.eventRepository = (AuditEventRepository<AuditEvent>) eventRepository;
         this.eventFactory = (Supplier<AuditEvent>) eventFactory;
-        this.schemaIdentifier = schemaIdentifier;
         this.applicationEventPublisher = applicationEventPublisher;
     }
 
@@ -66,7 +70,6 @@ public class DomainEventLogger {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void recordSynchronousEvent(EventWrapper<Object> wrapperEvent) {
         if (wrapperEvent.getTiming() != DispatchTiming.IMMEDIATE) return;
-        if (!isOwnSchema(wrapperEvent)) return;
         try {
             persistEventWithPreciseTiming(wrapperEvent);
         } catch (Exception e) {
@@ -78,19 +81,12 @@ public class DomainEventLogger {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void recordTransactionalEvent(EventWrapper<Object> wrapperEvent) {
         if (wrapperEvent.getTiming() != DispatchTiming.POST_COMMIT) return;
-        if (!isOwnSchema(wrapperEvent)) return;
         try {
             persistEventWithPreciseTiming(wrapperEvent);
             applicationEventPublisher.publishEvent(wrapperEvent.getEvent());
         } catch (Exception e) {
             logger.warn("Failed to persist or publish transactional event: {}", e.getMessage(), e);
         }
-    }
-
-    private boolean isOwnSchema(EventWrapper<Object> wrapper) {
-        ExecutionContext ctx = wrapper.getContext();
-        if (ctx == null || ctx.schemaIdentifier() == null) return false;
-        return ctx.schemaIdentifier().schemaName().equals(schemaIdentifier.schemaName());
     }
 
     private void persistEventWithPreciseTiming(EventWrapper<Object> wrappedEvent) {
@@ -119,8 +115,7 @@ public class DomainEventLogger {
         eventToSave.setSuccess(true);
 
         eventRepository.save(eventToSave);
-        logger.info("AUDIT [{}]: Event [{}] saved with createdAt={}",
-                schemaIdentifier.schemaName(), commandAwareEventType, uniqueTimestamp);
+        logger.info("AUDIT: Event [{}] saved with createdAt={}", commandAwareEventType, uniqueTimestamp);
     }
 
     private String writePayload(Object event) {
@@ -131,4 +126,3 @@ public class DomainEventLogger {
         }
     }
 }
-

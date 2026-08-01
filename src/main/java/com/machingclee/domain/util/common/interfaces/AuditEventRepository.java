@@ -7,7 +7,8 @@ import java.util.List;
 
 /**
  * Base repository interface for audit event entities.
- * Concrete schema repositories (SalesEventRepository, etc.) extend this.
+ * Consumers provide a concrete repository + entity; physical table/schema
+ * is controlled by the entity's {@code @Table} (and datasource), not this library.
  */
 @NoRepositoryBean
 public interface AuditEventRepository<E extends AuditEvent> extends JpaRepository<E, Integer> {

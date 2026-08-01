@@ -4,7 +4,6 @@ import com.machingclee.domain.util.common.interfaces.AuditEvent;
 import com.machingclee.domain.util.common.interfaces.AuditEventRepository;
 import com.machingclee.domain.util.common.interfaces.CommandAuditorPort;
 import com.machingclee.domain.util.common.interfaces.DomainEventDispatcher;
-import com.machingclee.domain.util.schema.SchemaIdentifier;
 import org.springframework.context.ApplicationContext;
 import org.springframework.transaction.PlatformTransactionManager;
 
@@ -13,31 +12,39 @@ import org.springframework.transaction.PlatformTransactionManager;
  * to subclass AbstractCommandInvoker themselves.
  * <p>
  * Consumers only need to provide:
- * - An AuditEventPort bean        → auto-configures DefaultCommandAuditor
- * - An AuditEventRepository bean  → passed in by the consumer
- * - A SchemaIdentifier            → e.g. TargetSchema.Schema.SALES
+ * - An ApplicationContext
+ * - A DomainEventDispatcher
+ * - A PlatformTransactionManager
+ * - A CommandAuditorPort
+ * - An AuditEventRepository (entity {@code @Table} decides physical storage)
  * <p>
- * Example registration in web.sales:
+ * Example:
  *
- * @Bean public CustomCommandInvoker salesCommandInvoker(
- * PlatformTransactionManager tm,
- * DefaultCommandAuditor auditor,
- * SalesEventRepository repo) {
- * return new CustomCommandInvoker(tm,
- * TargetSchema.Schema.SALES, auditor, repo);
+ * <pre>
+ * {@code
+ * @Bean
+ * public CustomCommandInvoker commandInvoker(
+ *         ApplicationContext context,
+ *         DomainEventDispatcher dispatcher,
+ *         PlatformTransactionManager tm,
+ *         CommandAuditorPort<? extends AuditEvent> auditor,
+ *         AuditEventRepository<? extends AuditEvent> repo) {
+ *     return new CustomCommandInvoker(context, dispatcher, tm, auditor, repo);
  * }
+ * }
+ * </pre>
  */
 public class CustomCommandInvoker extends AbstractCommandInvoker<AuditEvent> {
 
+    @SuppressWarnings("unchecked")
     public CustomCommandInvoker(
             ApplicationContext context,
             DomainEventDispatcher domainEventDispatcher,
             PlatformTransactionManager transactionManager,
-            SchemaIdentifier schemaIdentifier,
             CommandAuditorPort<? extends AuditEvent> auditor,
             AuditEventRepository<? extends AuditEvent> eventRepository
     ) {
-        super(context, domainEventDispatcher, transactionManager, schemaIdentifier,
+        super(context, domainEventDispatcher, transactionManager,
                 (CommandAuditorPort<AuditEvent>) auditor,
                 (AuditEventRepository<AuditEvent>) eventRepository);
     }

@@ -48,7 +48,7 @@ public class SpringDomainEventDispatcher implements DomainEventDispatcher {
             if (ctx != null && ctx.requestId() == null && requestId != null) {
                 wrappedEvent.setContext(new ExecutionContext(
                         ctx.userEmail(), requestId, ctx.originalMDC(),
-                        ctx.commandName(), ctx.schemaIdentifier()));
+                        ctx.commandName()));
             }
             // Publish the wrapper first — this logs the event (via DomainEventLogger)
             // before any policies run, so event_order in the DB reflects the true
@@ -70,12 +70,12 @@ public class SpringDomainEventDispatcher implements DomainEventDispatcher {
                 public void afterCommit() {
                     withContext(capturedContext, ctx -> {
                         for (EventWrapper<Object> wrappedEvent : wrappedEvents) {
-                            // Patch requestId into existing context, preserving schemaIdentifier
+                            // Patch requestId into existing context
                             ExecutionContext existing = wrappedEvent.getContext();
                             if (existing != null && existing.requestId() == null && ctx.requestId() != null) {
                                 wrappedEvent.setContext(new ExecutionContext(
                                         existing.userEmail(), ctx.requestId(), existing.originalMDC(),
-                                        existing.commandName(), existing.schemaIdentifier()));
+                                        existing.commandName()));
                             }
                             applicationEventPublisher.publishEvent(wrappedEvent);
                             applicationEventPublisher.publishEvent(wrappedEvent.getEvent());

@@ -8,7 +8,6 @@ import com.machingclee.domain.util.common.factory.EntityGraphService;
 import com.machingclee.domain.util.common.query.DefaultQueryInvoker;
 import com.machingclee.domain.util.common.query.interfaces.QueryHandler;
 import com.machingclee.domain.util.controller.DocController;
-import com.machingclee.domain.util.schema.SchemaIdentifier;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -36,10 +35,8 @@ public class DomainUtilAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    public ExternalEventPublisher externalEventPublisher(
-            ApplicationEventPublisher publisher,
-            ObjectProvider<SchemaIdentifier> schemaIdentifierProvider) {
-        return new ExternalEventPublisher(publisher, schemaIdentifierProvider.getIfAvailable());
+    public ExternalEventPublisher externalEventPublisher(ApplicationEventPublisher publisher) {
+        return new ExternalEventPublisher(publisher);
     }
 
     @Bean

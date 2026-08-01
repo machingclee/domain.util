@@ -19,8 +19,6 @@ import com.machingclee.domain.util.common.dto.PolicyFlowEntryDTO;
 import com.machingclee.domain.util.common.event.SmartEventQueue;
 import com.machingclee.domain.util.common.event.specialevent.ToBeArrangedEvent;
 import com.machingclee.domain.util.common.interfaces.*;
-import com.machingclee.domain.util.schema.SchemaIdentifier;
-import com.machingclee.domain.util.schema.TargetSchema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -38,15 +36,16 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Abstract base class for schema-specific CommandInvokers.
+ * Abstract base class for CommandInvokers.
  * <p>
  * All shared invocation logic lives here. Subclasses only provide:
- * - the target schema value (via targetSchema())
- * - the auditor (via auditor)
- * - the event repository (via eventRepository)
+ * - the auditor
+ * - the event repository (entity {@code @Table} decides physical storage)
  * - the transaction manager (injected by the subclass constructor)
  * <p>
- * Generic type E is the audit event entity for the schema (EChargeEvent or EcapiEvent).
+ * Generic type E is the audit event entity persisted by this invoker.
+ * Designed for a single pipeline per application: the invoker registers all
+ * {@link CommandHandler} beans in the context.
  */
 public abstract class AbstractCommandInvoker<E extends AuditEvent> implements CommandInvoker {
 
@@ -66,7 +65,6 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
 
     private volatile Map<Class<?>, CommandHandler<?, ?>> handlerMap;
 
-    private final SchemaIdentifier schemaIdentifier;
     private final CommandAuditorPort<E> auditor;
     private final AuditEventRepository<E> eventRepository;
 
@@ -78,17 +76,14 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
             ApplicationContext context,
             DomainEventDispatcher domainEventDispatcher,
             PlatformTransactionManager transactionManager,
-            SchemaIdentifier schemaIdentifier,
             CommandAuditorPort<E> auditor,
             AuditEventRepository<E> eventRepository
-
     ) {
         this.domainEventDispatcher = domainEventDispatcher;
         this.context = context;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-        this.schemaIdentifier = schemaIdentifier;
         this.auditor = auditor;
         this.eventRepository = eventRepository;
     }
@@ -162,7 +157,7 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
 
             if (isNestedCommand && TransactionSynchronizationManager.isSynchronizationActive()) {
                 logger.debug("Executing nested command in existing transaction");
-                SmartEventQueue eventQueue = new SmartEventQueue(schemaIdentifier);
+                SmartEventQueue eventQueue = new SmartEventQueue();
                 try {
                     // 1. Execute business logic
                     result = handler.handle(eventQueue, command);
@@ -193,7 +188,7 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
                 try {
                     transactionTemplate.execute(status -> {
                         try {
-                            SmartEventQueue eventQueue = new SmartEventQueue(schemaIdentifier);
+                            SmartEventQueue eventQueue = new SmartEventQueue();
                             try {
                                 // 1. Execute business logic
                                 resultHolder[0] = handler.handle(eventQueue, command);
@@ -312,19 +307,7 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
         logger.info("[{}] Found {} total CommandHandler bean(s): {}", getClass().getSimpleName(), allHandlers.size(),
                 allHandlers.stream().map(h -> AopUtils.getTargetClass(h).getSimpleName()).collect(Collectors.toList()));
 
-        List<String> missing = allHandlers.stream()
-                .filter(h -> AopUtils.getTargetClass(h).getAnnotation(TargetSchema.class) == null)
-                .map(h -> AopUtils.getTargetClass(h).getSimpleName())
-                .collect(Collectors.toList());
-        if (!missing.isEmpty()) {
-            throw new IllegalStateException(
-                    "The following CommandHandler(s) are missing @TargetSchema annotation: " + missing);
-        }
-
-        List<CommandHandler<?, ?>> commandHandlers = allHandlers.stream()
-                .filter(h -> AopUtils.getTargetClass(h).getAnnotation(TargetSchema.class).value()
-                        .isInstance(schemaIdentifier))
-                .collect(Collectors.toList());
+        List<CommandHandler<?, ?>> commandHandlers = allHandlers;
 
         Map<Class<?>, CommandHandler<?, ?>> map = new HashMap<>();
 
@@ -346,8 +329,8 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
                         "Multiple handlers found for command: " + commandClass.getSimpleName());
             }
             map.put(commandClass, handler);
-            logger.info("Registered [{}] command handler: {} for {}",
-                    schemaIdentifier.schemaName(), handler.getClass().getSimpleName(), commandClass.getSimpleName());
+            logger.info("Registered command handler: {} for {}",
+                    handler.getClass().getSimpleName(), commandClass.getSimpleName());
 
             List<Class<?>> scannedEvents = EventTypeScanner.scanEventTypes(handler);
             List<EventPayloadDTO> eventPayloads =

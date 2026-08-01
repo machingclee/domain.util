@@ -4,7 +4,6 @@ import com.machingclee.domain.util.common.event.enums.DispatchTiming;
 import com.machingclee.domain.util.common.ExecutionContext;
 import com.machingclee.domain.util.common.MdcContextKeys;
 import com.machingclee.domain.util.common.interfaces.EventQueue;
-import com.machingclee.domain.util.schema.SchemaIdentifier;
 import org.slf4j.MDC;
 
 import java.util.ArrayList;
@@ -14,10 +13,8 @@ import java.util.stream.Collectors;
 public class SmartEventQueue implements EventQueue {
 
     private final List<EventWrapper<Object>> events = new ArrayList<>();
-    private final SchemaIdentifier schemaIdentifier;
 
-    public SmartEventQueue(SchemaIdentifier schemaIdentifier) {
-        this.schemaIdentifier = schemaIdentifier;
+    public SmartEventQueue() {
     }
 
     @Override
@@ -53,8 +50,7 @@ public class SmartEventQueue implements EventQueue {
                 MDC.get(MdcContextKeys.USER_ID) != null ? MDC.get(MdcContextKeys.USER_ID) : "",
                 MDC.get(MdcContextKeys.REQUEST_ID),
                 MDC.getCopyOfContextMap(),
-                null,
-                schemaIdentifier);
+                null);
     }
 
     @Override

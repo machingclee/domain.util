@@ -18,8 +18,6 @@ Java package root: `com.machingclee.domain.util`
 
 - Command / query invokers with handler discovery
 - Domain event dispatch (Spring `ApplicationEventPublisher`)
-- Schema-targeted handlers via `@TargetSchema` + `SchemaIdentifier`
-- Compile-time enforcement that concrete `CommandHandler`s declare `@TargetSchema`
 - Optional audit event logging hooks
 - Built-in command-flow docs + visualization under `/docs` (when a command invoker bean is present)
 
@@ -28,43 +26,87 @@ Java package root: `com.machingclee.domain.util`
 - Java 17+
 - Spring Boot 3.x / 4.x (most Spring deps are `optional` — bring what your app uses)
 
+## Design note: no multi-schema routing
+
+This library is **single-pipeline** by default:
+
+- One `CommandInvoker` registers **all** `CommandHandler` beans in the application context
+- One `DomainEventLogger` persists **all** domain events via its injected repository
+- **Where rows are stored** is decided only by your JPA setup:
+  - entity `@Table(name = "...", schema = "...")` (optional Postgres schema)
+  - which `AuditEventRepository` / datasource you inject
+
+There is **no** `@TargetSchema` / `SchemaIdentifier` API. Prefer separate applications or separate persistence units if you need multiple event stores.
+
 ## Quick consumer setup
 
 1. Add the dependency above (local install or GitHub Packages once published).
-2. Define your schema:
 
-```java
-public enum SalesSchema implements SchemaIdentifier {
-    SALES;
+2. **Create these Spring beans** (names below use a `SomeDomain` placeholder — rename for your domain):
 
-    @Override
-    public String schemaName() {
-        return name().toLowerCase();
-    }
-}
-```
+   | Class | Extends / implements | Role |
+   |-------|----------------------|------|
+   | `SomeDomainEvent` | `AuditEvent` | JPA entity for command/event audit rows (`@Table` decides storage) |
+   | `SomeDomainEventRepository` | `AuditEventRepository<SomeDomainEvent>` | Persistence for audit rows |
+   | `SomeDomainCommandAuditor` | `CustomCommandAuditor<SomeDomainEvent>` | Writes command audit rows |
+   | `SomeDomainCommandInvoker` | `AbstractCommandInvoker<SomeDomainEvent>` | Dispatches all commands |
+   | `SomeDomainDomainEventLogger` | `DomainEventLogger` | Persists all domain events |
 
-3. Annotate handlers:
+   ```java
+   // SomeDomainCommandAuditor.java
+   @Component
+   public class SomeDomainCommandAuditor extends CustomCommandAuditor<SomeDomainEvent> {
+       public SomeDomainCommandAuditor(SomeDomainEventRepository eventRepository) {
+           super(eventRepository, SomeDomainEvent::new);
+       }
+   }
+   ```
 
-```java
-@TargetSchema(SalesSchema.class)
-@Component
-public class CreateOrderHandler implements CommandHandler<CreateOrderCommand, Void> {
-    // ...
-}
-```
+   ```java
+   // SomeDomainCommandInvoker.java
+   @Component
+   public class SomeDomainCommandInvoker extends AbstractCommandInvoker<SomeDomainEvent> {
+       public SomeDomainCommandInvoker(
+               ApplicationContext context,
+               DomainEventDispatcher domainEventDispatcher,
+               PlatformTransactionManager transactionManager,
+               SomeDomainCommandAuditor auditor,
+               SomeDomainEventRepository eventRepository
+       ) {
+           super(
+                   context,
+                   domainEventDispatcher,
+                   transactionManager,
+                   auditor,
+                   eventRepository
+           );
+       }
+   }
+   ```
 
-4. If you already list Lombok / MapStruct under `maven-compiler-plugin`  
-   `<annotationProcessorPaths>`, also add this library there so the  
-   `@TargetSchema` processor is still applied:
+   ```java
+   // SomeDomainDomainEventLogger.java
+   @Component
+   public class SomeDomainDomainEventLogger extends DomainEventLogger {
+       public SomeDomainDomainEventLogger(
+               SomeDomainEventRepository eventRepository,
+               ApplicationEventPublisher publisher
+       ) {
+           super(eventRepository, SomeDomainEvent::new, publisher);
+       }
+   }
+   ```
 
-```xml
-<path>
-    <groupId>com.machingclee</groupId>
-    <artifactId>domain-util</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
-</path>
-```
+   Prefer **one** invoker and **one** event logger per application. Multiple loggers would each receive every event and may double-write.
+
+3. Implement handlers (no schema annotation required):
+
+   ```java
+   @Component
+   public class CreateSomethingHandler implements CommandHandler<CreateSomethingCommand, Void> {
+       // ...
+   }
+   ```
 
 ## Event-storming frontend
 
@@ -87,7 +129,7 @@ mvn clean install -DskipTests
 
 ## Origin
 
-Extracted and rebranded from an internal `domain.util` module used in multi-module Spring Boot services. This repository is the standalone, personal open-source form under `com.machingclee`.
+Extracted and rebranded from an internal `domain.util` module used in multi-module Spring Boot services. This repository is the standalone, personal open-source form under `com.machingclee`. Multi-schema routing from that origin was removed in favor of single-pipeline + `@Table`-based persistence.
 
 ## License
 

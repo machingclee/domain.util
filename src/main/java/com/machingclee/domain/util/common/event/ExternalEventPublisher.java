@@ -2,7 +2,6 @@ package com.machingclee.domain.util.common.event;
 
 import com.machingclee.domain.util.common.ExecutionContext;
 import com.machingclee.domain.util.common.event.enums.DispatchTiming;
-import com.machingclee.domain.util.schema.SchemaIdentifier;
 import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.Map;
@@ -26,31 +25,16 @@ import java.util.UUID;
  * delivered after the current transaction commits (via Spring's
  * {@code @TransactionalEventListener})</li>
  * </ul>
+ * <p>
+ * Where events are stored is determined by the consumer's {@link DomainEventLogger}
+ * bean (its repository + entity {@code @Table}), not by this publisher.
  */
 public class ExternalEventPublisher {
 
     private final ApplicationEventPublisher applicationEventPublisher;
-    private final SchemaIdentifier schemaIdentifier;
 
-    /**
-     * Create a publisher that does not target any specific schema.
-     * Events published this way are still visible to generic listeners, but
-     * {@link DomainEventLogger} instances will skip them because they match on
-     * {@link SchemaIdentifier}.
-     */
     public ExternalEventPublisher(ApplicationEventPublisher applicationEventPublisher) {
-        this(applicationEventPublisher, null);
-    }
-
-    /**
-     * Create a publisher that tags every event with the given
-     * {@link SchemaIdentifier} so that the matching {@link DomainEventLogger}
-     * persists it.
-     */
-    public ExternalEventPublisher(ApplicationEventPublisher applicationEventPublisher,
-            SchemaIdentifier schemaIdentifier) {
         this.applicationEventPublisher = applicationEventPublisher;
-        this.schemaIdentifier = schemaIdentifier;
     }
 
     /**
@@ -90,8 +74,7 @@ public class ExternalEventPublisher {
                 "ExternalEventPublisher",
                 requestId,
                 dummyMDC,
-                "ExternalEvent",
-                schemaIdentifier);
+                "ExternalEvent");
         return new EventWrapper<>(event, timing, ctx);
     }
 }

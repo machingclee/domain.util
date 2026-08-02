@@ -29,8 +29,9 @@ import java.util.Set;
 
 /**
  * Builds a complete entity graph for the event-storming visualizer: every JPA
- * entity with its factory methods, domain behaviour methods, and association
- * edges ({@code OneToOne}, {@code OneToMany}, {@code ManyToOne}, {@code ManyToMany}).
+ * entity with its factory methods, domain behaviour methods, association edges
+ * ({@code OneToOne}, {@code OneToMany}, {@code ManyToOne}, {@code ManyToMany}),
+ * and persisted column schema ({@code @Column}, {@code @JoinColumn}, {@code @Id}).
  * <p>
  * Replaces the factories-only scan with a fuller {@link EntityNodeDTO} list so
  * the frontend can render an {@code Entities} tab (left-to-right relation edges,
@@ -97,12 +98,14 @@ public class EntityGraphService {
             List<EntityMethodDTO> factories = scanFactoryMethods(entityClass);
             List<EntityMethodDTO> domainMethods = scanDomainMethods(entityClass);
             List<EntityRelationDTO> relations = scanRelations(entityClass, entityByName.keySet());
+            Map<String, Object> columns = scanColumns(entityClass);
 
             result.add(new EntityNodeDTO(
-                    entityName, contextName, factories, domainMethods, relations));
+                    entityName, contextName, factories, domainMethods, relations, columns));
 
-            logger.debug("Entity node {}: factories={}, domainMethods={}, relations={}",
-                    entityName, factories.size(), domainMethods.size(), relations.size());
+            logger.debug("Entity node {}: factories={}, domainMethods={}, relations={}, columns={}",
+                    entityName, factories.size(), domainMethods.size(), relations.size(),
+                    columns.size());
         }
 
         // Stable order: context then name
@@ -135,6 +138,163 @@ public class EntityGraphService {
      */
     public Map<String, Map<String, Object>> getEntityDtos() {
         return new LinkedHashMap<>(entityDtos);
+    }
+
+    // ── columns ────────────────────────────────────────────────────────────
+
+    /**
+     * Build the persisted column schema for an entity: every field annotated with
+     * {@code @Column}, {@code @JoinColumn}, or {@code @Id} (including superclass
+     * fields). Values are TypeScript-style type descriptors.
+     * <p>
+     * Map keys are the <em>physical</em> DB column names from
+     * {@code @Column(name=...)} / {@code @JoinColumn(name=...)} — never Java
+     * property / getter names. When {@code name} is blank or absent, the Java
+     * field name is used as a last resort.
+     * <p>
+     * {@code @Id} / {@code @EmbeddedId} fields are always listed first, then the
+     * remaining columns sorted alphabetically by physical column name.
+     * <p>
+     * {@code @JoinColumn} association fields resolve to the FK scalar type when
+     * the target has a single {@code @Id} field (e.g. {@code number} for
+     * {@code Integer id}); otherwise the readable target entity name is used.
+     * Collection relations ({@code @OneToMany} / {@code @ManyToMany}) are omitted
+     * because they do not map to a column on this table.
+     */
+    private Map<String, Object> scanColumns(Class<?> entityClass) {
+        // Collect hierarchy root → leaf so superclass fields come first.
+        List<Class<?>> hierarchy = new ArrayList<>();
+        for (Class<?> c = entityClass; c != null && c != Object.class; c = c.getSuperclass()) {
+            hierarchy.add(c);
+        }
+        java.util.Collections.reverse(hierarchy);
+
+        List<Map.Entry<String, Object>> idColumns = new ArrayList<>();
+        List<Map.Entry<String, Object>> otherColumns = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+
+        for (Class<?> c : hierarchy) {
+            for (Field field : c.getDeclaredFields()) {
+                if (Modifier.isStatic(field.getModifiers()) || field.isSynthetic()) continue;
+
+                boolean hasColumn = findAnnotation(field, "Column") != null;
+                boolean hasJoinColumn = findAnnotation(field, "JoinColumn") != null;
+                boolean hasId = findAnnotation(field, "Id") != null;
+                boolean hasEmbeddedId = findAnnotation(field, "EmbeddedId") != null;
+                boolean hasVersion = findAnnotation(field, "Version") != null;
+                boolean hasEnumerated = findAnnotation(field, "Enumerated") != null;
+                boolean hasLob = findAnnotation(field, "Lob") != null;
+                boolean hasTemporal = findAnnotation(field, "Temporal") != null;
+
+                RelationMeta relation = resolveRelationMeta(field);
+                // Inverse / collection sides have no FK column on this table
+                if (relation != null
+                        && ("ONE_TO_MANY".equals(relation.type())
+                        || "MANY_TO_MANY".equals(relation.type()))) {
+                    continue;
+                }
+                if (relation != null && !relation.owningSide()) {
+                    continue;
+                }
+
+                boolean include = hasColumn || hasJoinColumn || hasId || hasEmbeddedId
+                        || hasVersion || hasEnumerated || hasLob || hasTemporal
+                        || (relation != null && relation.owningSide()
+                        && ("MANY_TO_ONE".equals(relation.type())
+                        || "ONE_TO_ONE".equals(relation.type())));
+
+                if (!include) continue;
+
+                String columnName = resolvePhysicalColumnName(field);
+                if (!seen.add(columnName)) continue;
+
+                String typeName = describeColumnType(field, relation);
+                Map.Entry<String, Object> entry = Map.entry(columnName, typeName);
+                if (hasId || hasEmbeddedId) {
+                    idColumns.add(entry);
+                } else {
+                    otherColumns.add(entry);
+                }
+            }
+        }
+
+        // Id columns always first; remaining columns alphabetically by physical name
+        Map<String, Object> columns = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> e : idColumns) {
+            columns.put(e.getKey(), e.getValue());
+        }
+        otherColumns.sort((a, b) -> a.getKey().compareToIgnoreCase(b.getKey()));
+        for (Map.Entry<String, Object> e : otherColumns) {
+            columns.put(e.getKey(), e.getValue());
+        }
+        return columns;
+    }
+
+    /**
+     * Physical DB column name for a field.
+     * Prefers {@code @Column(name)} then {@code @JoinColumn(name)}; falls back to
+     * the Java field name only when no explicit name is present.
+     */
+    private static String resolvePhysicalColumnName(Field field) {
+        String fromColumn = readAnnotationNameAttribute(findAnnotation(field, "Column"));
+        if (fromColumn != null) return fromColumn;
+        String fromJoin = readAnnotationNameAttribute(findAnnotation(field, "JoinColumn"));
+        if (fromJoin != null) return fromJoin;
+        return field.getName();
+    }
+
+    /**
+     * Read non-blank {@code name()} from a JPA annotation such as {@code @Column}
+     * or {@code @JoinColumn}. Returns {@code null} when absent or blank.
+     */
+    private static String readAnnotationNameAttribute(Annotation ann) {
+        if (ann == null) return null;
+        try {
+            Method m = ann.annotationType().getMethod("name");
+            Object v = m.invoke(ann);
+            if (v == null) return null;
+            String name = v.toString().trim();
+            return name.isEmpty() ? null : name;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * TypeScript-style type for a persisted field. Join columns use the target
+     * entity's id type when a single {@code @Id} is found.
+     */
+    private static String describeColumnType(Field field, RelationMeta relation) {
+        if (relation != null && relation.targetType() != null
+                && ("MANY_TO_ONE".equals(relation.type())
+                || "ONE_TO_ONE".equals(relation.type()))) {
+            Class<?> idType = resolveSingleIdType(relation.targetType());
+            if (idType != null) {
+                return EventTypeScanner.describeTypeName(idType, null);
+            }
+            // Composite / unknown id — show target entity name as FK reference
+            return EventTypeScanner.getReadableClassName(relation.targetType());
+        }
+        return EventTypeScanner.describeTypeName(field.getGenericType(), null);
+    }
+
+    /**
+     * Return the Java type of a single {@code @Id} field on {@code entityClass}
+     * (walking superclasses). {@code null} when none, multi-id, or {@code @EmbeddedId}.
+     */
+    private static Class<?> resolveSingleIdType(Class<?> entityClass) {
+        if (entityClass == null) return null;
+        Class<?> found = null;
+        for (Class<?> c = entityClass; c != null && c != Object.class; c = c.getSuperclass()) {
+            for (Field f : c.getDeclaredFields()) {
+                if (Modifier.isStatic(f.getModifiers()) || f.isSynthetic()) continue;
+                if (findAnnotation(f, "EmbeddedId") != null) return null;
+                if (findAnnotation(f, "Id") == null) continue;
+                if (found != null) return null; // multi-id
+                found = f.getType();
+            }
+        }
+        return found;
     }
 
     // ── factories ──────────────────────────────────────────────────────────

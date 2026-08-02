@@ -9,7 +9,8 @@ import java.util.Map;
  * Aggregate payload for the command-flow visualizer.
  * <p>
  * {@code factories}/{@code factoryDtos} remain for older UIs; prefer
- * {@code entities}/{@code entityDtos} for the full entity graph.
+ * {@code entities}/{@code entityDtos} for the full entity graph (factories,
+ * domain methods, relations, and persisted {@code columns}).
  */
 @Builder
 public record FlowResponseDTO(List<CommandEventFlowDTO> commands,

@@ -39,14 +39,14 @@ import java.util.Set;
  * Audit event entities ({@link AuditEvent} implementors and {@code *Event} names)
  * are excluded — they are not domain model nodes for the Entities tab.
  * <p>
- * Requires a JPA {@link EntityManager} bean named {@code "entityManager"}. When
- * none is available the scanner returns empty results.
+ * Requires JPA ({@link EntityManager} / {@code EntityManagerFactory}). Resolution
+ * is handled by {@link EntityManagerAccess} — Spring Boot does not register a
+ * bean named {@code "entityManager"} by default. When JPA is unavailable the
+ * scanner returns empty results.
  */
 public class EntityGraphService {
 
     private static final Logger logger = LoggerFactory.getLogger(EntityGraphService.class);
-
-    private static final String ENTITY_MANAGER_BEAN_NAME = "entityManager";
 
     private static final Set<String> RELATION_ANNOTATIONS = Set.of(
             "OneToOne", "OneToMany", "ManyToOne", "ManyToMany");
@@ -60,13 +60,7 @@ public class EntityGraphService {
     }
 
     private EntityManager entityManager() {
-        try {
-            return context.getBean(ENTITY_MANAGER_BEAN_NAME, EntityManager.class);
-        } catch (Exception e) {
-            logger.debug("EntityManager bean '{}' not available: {}",
-                    ENTITY_MANAGER_BEAN_NAME, e.getMessage());
-            return null;
-        }
+        return EntityManagerAccess.resolve(context, logger);
     }
 
     /**

@@ -25,16 +25,13 @@ import java.util.*;
  * {@link com.machingclee.domain.util.common.dto.QueryFlowDTO} so the frontend
  * visualizer can render factory methods in a dedicated "Factories" tab.
  * <p>
- * Requires a JPA {@link EntityManager} bean named {@code "entityManager"} in
- * the application context.  When none is available (e.g. the consuming module
- * does not use JPA) the scanner gracefully returns empty lists.
+ * Requires JPA ({@link EntityManager} / {@code EntityManagerFactory}). Resolution
+ * is handled by {@link EntityManagerAccess}. When JPA is unavailable (e.g. the
+ * consuming module does not use JPA) the scanner gracefully returns empty lists.
  */
 public class EntityFactoryService {
 
     private static final Logger logger = LoggerFactory.getLogger(EntityFactoryService.class);
-
-    /** Standard Spring Boot JPA {@code EntityManager} bean name. */
-    private static final String ENTITY_MANAGER_BEAN_NAME = "entityManager";
 
     private final ApplicationContext context;
 
@@ -46,19 +43,11 @@ public class EntityFactoryService {
 
     /**
      * Resolve the {@link EntityManager} lazily so the bean can be created before
-     * the JPA infrastructure is fully ready.  Uses the well-known bean name
-     * {@code "entityManager"} to avoid ambiguity when multiple
-     * {@code EntityManager}-assignable beans exist (e.g. with read/write
-     * DataSource routing).
+     * the JPA infrastructure is fully ready. Prefer a named {@code entityManager}
+     * bean, then a typed bean, then a shared EM from {@code entityManagerFactory}.
      */
     private EntityManager entityManager() {
-        try {
-            return context.getBean(ENTITY_MANAGER_BEAN_NAME, EntityManager.class);
-        } catch (Exception e) {
-            logger.debug("EntityManager bean '{}' not available: {}",
-                    ENTITY_MANAGER_BEAN_NAME, e.getMessage());
-            return null;
-        }
+        return EntityManagerAccess.resolve(context, logger);
     }
 
     /**

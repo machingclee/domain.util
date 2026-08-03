@@ -92,7 +92,36 @@ with:
 
 Keep surrounding indentation and do not reformat the whole POM.
 
-## Step 4 — Git commit, tag, push
+## Step 4 — Update README.md consumer dependency version
+
+Also update the Maven coordinates example under the **domain-util** section at
+the top of `README.md` (the dependency snippet consumers copy).
+
+In the block:
+
+```xml
+<dependency>
+    <groupId>com.machingclee</groupId>
+    <artifactId>domain-util</artifactId>
+    <version>OLD</version>
+</dependency>
+```
+
+Replace the version with `NEW` so it matches `pom.xml`:
+
+```xml
+    <version>NEW</version>
+```
+
+- Target **only** that domain-util dependency snippet (groupId
+  `com.machingclee` / artifactId `domain-util`), not unrelated versions
+  elsewhere in the README.
+- Keep surrounding indentation; do not reformat the whole file.
+- If the README version is already equal to `NEW`, leave it as-is.
+- If the README version cannot be found or is ambiguous, stop and show the
+  relevant lines before continuing.
+
+## Step 5 — Git commit, tag, push
 
 Run in order. Use the real `NEW` version everywhere below.
 
@@ -112,16 +141,19 @@ Notes:
 - If `main` is not the current branch, push the current branch only after confirming with the user; prefer being on `main`.
 - Do **not** force-push. Do **not** delete or move existing tags unless the user explicitly asks.
 - If the tag already exists locally or on remote, stop and ask the user (do not overwrite).
+- Staged changes should include both `pom.xml` and `README.md` when the README
+  version was updated.
 
-## Step 5 — Report
+## Step 6 — Report
 
 After successful pushes, tell the user:
 
 1. Old version → new version
-2. Commit hash / message
-3. Tag name
-4. That `git push origin vNEW` should have triggered **Publish to GitHub Packages**
-5. Optional: link shape  
+2. That `pom.xml` and the README domain-util `<version>` were updated
+3. Commit hash / message
+4. Tag name
+5. That `git push origin vNEW` should have triggered **Publish to GitHub Packages**
+6. Optional: link shape  
    `https://github.com/machingclee/domain.util/actions`
 
 ## Failure handling
@@ -133,6 +165,7 @@ After successful pushes, tell the user:
 | Tag `vNEW` already exists | Stop; ask for a different bump or delete strategy |
 | Push rejected (non-fast-forward) | Stop; do not force; report remote status |
 | `pom.xml` version not found / multiple candidates | Stop; show the ambiguous lines |
+| README domain-util version not found / ambiguous | Stop; show the relevant README lines |
 
 ## Example (full)
 
@@ -143,7 +176,9 @@ Current: `0.1.2-SNAPSHOT`, user chooses **patch**.
 3. Commands:
 
 ```bash
-# after editing pom.xml <version>0.1.3-SNAPSHOT</version>
+# after editing:
+# - pom.xml project <version>0.1.3-SNAPSHOT</version>
+# - README.md domain-util dependency <version>0.1.3-SNAPSHOT</version>
 git add .
 git commit -m "deploy 0.1.3-SNAPSHOT version"
 git tag "v0.1.3-SNAPSHOT"

@@ -13,7 +13,7 @@
 
     <groupId>com.machingclee</groupId>
     <artifactId>domain-util</artifactId>
-    <version>0.1.3-SNAPSHOT</version>
+    <version>0.1.4-SNAPSHOT</version>
     <name>domain-util</name>
     <description>
         Spring Boot library for a Command to Event to Policy (CQRS-style) pipeline:

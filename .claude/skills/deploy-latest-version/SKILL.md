@@ -25,13 +25,13 @@ CI trigger (do not change): `.github/workflows/publish.yml` runs on
 Before changing anything:
 
 1. Working tree should be on `main` (or confirm with the user if not).
-2. Read the current version from root `pom.xml`:
+2. Read the current **domain-util** project version from root `pom.xml`:
    ```bash
-   # Prefer xmllint/python; fallback to grep
-   grep -m1 '<version>' pom.xml
+   # Extract <version> that follows <artifactId>domain-util</artifactId>
+   awk '/<artifactId>domain-util<\/artifactId>/{getline; gsub(/<\/?version>/,""); gsub(/^[[:space:]]+|[[:space:]]+$/,""); print; exit}' pom.xml
    ```
-   Project coordinates version is the **first** top-level `<version>` under
-   `<project>` (not the parent Spring Boot version). Example: `0.1.2-SNAPSHOT`.
+   This gets only the domain-util project version, never the
+   `<parent><version>` (Spring Boot). Example output: `0.1.2`.
 3. Show status so the user knows what will be committed:
    ```bash
    git status
@@ -45,7 +45,7 @@ Before changing anything:
 **Always ask** (unless the user already said major / minor / patch in the same
 message). Use a short question:
 
-> Current version in `pom.xml` is **`X.Y.Z[-SNAPSHOT]`**.  
+> Current version in `pom.xml` is **`X.Y.Z`**.  
 > Increment which part? **major** / **minor** / **patch**?
 
 Do not invent a default bump. Wait for the answer.
@@ -58,18 +58,18 @@ Parse current version as:
 MAJOR.MINOR.PATCH[-QUALIFIER]
 ```
 
-Examples: `0.1.2-SNAPSHOT`, `0.1.0`, `1.0.0-SNAPSHOT`.
+Examples: `0.1.2`, `0.1.0`, `1.0.0`.
 
-| Choice | Rule | Example (`0.1.2-SNAPSHOT`) |
+| Choice | Rule | Example (`0.1.2`) |
 |--------|------|----------------------------|
-| **major** | `MAJOR+1`, reset minor & patch to `0` | `1.0.0-SNAPSHOT` |
-| **minor** | `MINOR+1`, reset patch to `0` | `0.2.0-SNAPSHOT` |
-| **patch** | `PATCH+1` | `0.1.3-SNAPSHOT` |
+| **major** | `MAJOR+1`, reset minor & patch to `0` | `1.0.0` |
+| **minor** | `MINOR+1`, reset patch to `0` | `0.2.0` |
+| **patch** | `PATCH+1` | `0.1.3` |
 
-- **Preserve** any qualifier (e.g. `-SNAPSHOT`) on the new version.
-- Tag name is always `v` + new version (e.g. `v0.1.3-SNAPSHOT`).
+- **Preserve** any qualifier (e.g. ``) on the new version.
+- Tag name is always `v` + new version (e.g. `v0.1.3`).
 - Commit message is exactly: `deploy <new-version> version`  
-  Example: `deploy 0.1.3-SNAPSHOT version`
+  Example: `deploy 0.1.3 version`
 
 Confirm with the user before writing files if anything looks ambiguous
 (e.g. non-semver version string). Otherwise proceed after they chose major/minor/patch.
@@ -169,21 +169,21 @@ After successful pushes, tell the user:
 
 ## Example (full)
 
-Current: `0.1.2-SNAPSHOT`, user chooses **patch**.
+Current: `0.1.2`, user chooses **patch**.
 
-1. New version: `0.1.3-SNAPSHOT`
-2. Tag: `v0.1.3-SNAPSHOT`
+1. New version: `0.1.3`
+2. Tag: `v0.1.3`
 3. Commands:
 
 ```bash
 # after editing:
-# - pom.xml project <version>0.1.3-SNAPSHOT</version>
-# - README.md domain-util dependency <version>0.1.3-SNAPSHOT</version>
+# - pom.xml project <version>0.1.3</version>
+# - README.md domain-util dependency <version>0.1.3</version>
 git add .
-git commit -m "deploy 0.1.3-SNAPSHOT version"
-git tag "v0.1.3-SNAPSHOT"
+git commit -m "deploy 0.1.3 version"
+git tag "v0.1.3"
 git push origin main
-git push origin "v0.1.3-SNAPSHOT"
+git push origin "v0.1.3"
 ```
 
 ## Out of scope

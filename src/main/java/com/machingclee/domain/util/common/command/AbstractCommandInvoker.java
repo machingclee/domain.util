@@ -174,10 +174,12 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
                     //    mirrors logFailure and commits the flag in a fresh transaction.
                     auditor.logSuccess(commandEvent.getId());
                 } catch (Exception e) {
-                    // Stamp failure on command record, then mark every domain-event record
-                    // for this request as failed (they were committed by DomainEventLogger).
+                    // Stamp failure on this nested command's audit row only.
+                    // Do NOT call markEventsFailed(requestId, ...) here — the
+                    // parent command's events were already committed with
+                    // success=true and must never be retroactively failed
+                    // by a downstream nested command failure.
                     auditor.logFailure(commandEvent.getId(), stackTraceOf(e));
-                    markEventsFailed(requestId, stackTraceOf(e));
                     throw e;
                 }
             } else {

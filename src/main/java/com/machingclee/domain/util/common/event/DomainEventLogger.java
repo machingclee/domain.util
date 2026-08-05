@@ -77,7 +77,19 @@ public class DomainEventLogger {
         }
     }
 
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    /**
+     * Listens for post-commit EventWrappers.  The {@code fallbackExecution = true}
+     * is required so that events dispatched inside a
+     * {@code TransactionSynchronization.afterCommit()} callback (where there is
+     * no longer an active transaction) are still recorded — without it Spring
+     * would silently skip the listener and the event would never be logged.
+     * <p>
+     * For the canonical within-transaction case this listener still fires
+     * only after the enclosing transaction commits, preserving the existing
+     * deferred semantics.
+     */
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT,
+                                fallbackExecution = true)
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void recordTransactionalEvent(EventWrapper<Object> wrapperEvent) {
         if (wrapperEvent.getTiming() != DispatchTiming.POST_COMMIT) return;

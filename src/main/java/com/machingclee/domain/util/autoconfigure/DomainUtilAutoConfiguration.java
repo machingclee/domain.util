@@ -7,6 +7,7 @@ import com.machingclee.domain.util.common.factory.EntityFactoryService;
 import com.machingclee.domain.util.common.factory.EntityGraphService;
 import com.machingclee.domain.util.common.query.DefaultQueryInvoker;
 import com.machingclee.domain.util.common.query.interfaces.QueryHandler;
+import com.machingclee.domain.util.common.query.interfaces.QueryInvoker;
 import com.machingclee.domain.util.controller.DocController;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -27,7 +28,7 @@ public class DomainUtilAutoConfiguration {
     }
 
     @Bean
-    @ConditionalOnBean(QueryHandler.class)
+    @ConditionalOnMissingBean(QueryInvoker.class)
     public DefaultQueryInvoker defaultQueryInvoker(List<QueryHandler<?, ?>> queryHandlers,
                                                    ApplicationContext context) {
         return new DefaultQueryInvoker(queryHandlers, context);

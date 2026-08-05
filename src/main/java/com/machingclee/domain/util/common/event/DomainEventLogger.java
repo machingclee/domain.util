@@ -83,9 +83,8 @@ public class DomainEventLogger {
         if (wrapperEvent.getTiming() != DispatchTiming.POST_COMMIT) return;
         try {
             persistEventWithPreciseTiming(wrapperEvent);
-            applicationEventPublisher.publishEvent(wrapperEvent.getEvent());
         } catch (Exception e) {
-            logger.warn("Failed to persist or publish transactional event: {}", e.getMessage(), e);
+            logger.warn("Failed to persist transactional event: {}", e.getMessage(), e);
         }
     }
 

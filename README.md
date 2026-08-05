@@ -8,7 +8,7 @@ Maven coordinates:
 <dependency>
     <groupId>com.machingclee</groupId>
     <artifactId>domain-util</artifactId>
-    <version>0.1.4-SNAPSHOT</version>
+    <version>0.1.5-SNAPSHOT</version>
 </dependency>
 ```
 

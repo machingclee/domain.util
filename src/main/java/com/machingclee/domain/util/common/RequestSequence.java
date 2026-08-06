@@ -55,17 +55,34 @@ public final class RequestSequence {
     }
 
     /**
-     * Returns the next sequence number for the current requestId and
-     * increments the counter. If the counter does not exist yet it is
-     * created with an initial value of 0 before incrementing (so the
-     * first call returns 1). Falls back to a per-thread counter when
-     * no requestId is present in MDC.
+     * Returns the next sequence number for the current MDC requestId and
+     * increments the counter. Equivalent to {@code next(MDC.get(REQUEST_ID))}.
      *
      * @return the next sequence number (1-based)
      */
     public static int next() {
-        String requestId = MDC.get(MdcContextKeys.REQUEST_ID);
-        if (requestId == null) {
+        return next(MDC.get(MdcContextKeys.REQUEST_ID));
+    }
+
+    /**
+     * Returns the next sequence number for the given requestId and
+     * increments the counter. If the counter does not exist yet it is
+     * created with an initial value of 0 before incrementing (so the
+     * first call returns 1).
+     * <p>
+     * Prefer this overload when the request id is known from
+     * {@link ExecutionContext} (or similar) but may no longer be present
+     * in MDC — e.g. deferred POST_COMMIT audit logging that runs after
+     * a dispatcher has cleared MDC.
+     * <p>
+     * Falls back to a per-thread counter when {@code requestId} is null
+     * or blank.
+     *
+     * @param requestId correlation id for this command/event trail; may be null
+     * @return the next sequence number (1-based)
+     */
+    public static int next(String requestId) {
+        if (requestId == null || requestId.isBlank()) {
             return threadLocalCounter();
         }
         AtomicInteger counter = sequences.computeIfAbsent(

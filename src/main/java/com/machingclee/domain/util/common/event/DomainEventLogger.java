@@ -87,6 +87,11 @@ public class DomainEventLogger {
      * For the canonical within-transaction case this listener still fires
      * only after the enclosing transaction commits, preserving the existing
      * deferred semantics.
+     * <p>
+     * {@link #persistEventWithPreciseTiming} assigns {@code event_order} via
+     * {@link RequestSequence#next(String)} using the resolved request id
+     * (MDC or {@link ExecutionContext}), so order stays correct even when MDC
+     * has already been cleared by the time this listener runs.
      */
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT,
                                 fallbackExecution = true)
@@ -105,7 +110,9 @@ public class DomainEventLogger {
         ExecutionContext ctx = wrappedEvent.getContext();
 
         String rawId = MDC.get(MdcContextKeys.REQUEST_ID);
-        if (rawId == null && ctx != null) rawId = ctx.requestId();
+        if ((rawId == null || rawId.isBlank()) && ctx != null) {
+            rawId = ctx.requestId();
+        }
         String requestId = rawId != null ? rawId : "";
 
         String userId = (ctx != null && ctx.userEmail() != null) ? ctx.userEmail() : "";
@@ -122,7 +129,9 @@ public class DomainEventLogger {
         eventToSave.setPayload(writePayload(event));
         eventToSave.setRequestUserEmail(userId);
         eventToSave.setRequestId(requestId);
-        eventToSave.setEventOrder(RequestSequence.next());
+        // Prefer the resolved request id over MDC alone — POST_COMMIT logging
+        // may run after a dispatcher finally-block cleared MDC.
+        eventToSave.setEventOrder(RequestSequence.next(requestId.isBlank() ? null : requestId));
         eventToSave.setSuccess(true);
 
         eventRepository.save(eventToSave);

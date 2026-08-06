@@ -47,7 +47,7 @@ public class CustomCommandAuditor<E extends AuditEvent> implements CommandAudito
             E event = eventFactory.get();
             event.setCreatedAt((double) uniqueTimestamp);
             event.setRequestId(requestId);
-            event.setEventOrder(RequestSequence.next());
+            event.setEventOrder(RequestSequence.next(requestId));
             event.setEventType(commandEventType);
             event.setPayload(payload);
             event.setRequestUserEmail(userId);

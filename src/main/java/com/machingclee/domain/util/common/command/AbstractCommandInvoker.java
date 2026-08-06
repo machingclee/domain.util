@@ -222,10 +222,18 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
                 }
 
                 if (exceptionHolder[0] != null) {
-                    // Stamp failure on command record, then mark every domain-event record
-                    // for this request as failed (they were committed by DomainEventLogger).
+                    // Stamp failure on this command's audit row only.
                     auditor.logFailure(commandEvent.getId(), stackTraceOf(exceptionHolder[0]));
-                    markEventsFailed(requestId, stackTraceOf(exceptionHolder[0]));
+                    // markEventsFailed is only for true top-level failures.
+                    // Nested commands (same requestId from MDC, e.g. policy-dispatched
+                    // notification after a POST_COMMIT event) must not retroactively
+                    // fail the parent command / already-committed domain events.
+                    // isNestedCommand can be true while isSynchronizationActive is false
+                    // (afterCommit has no TX) — that still uses this branch for a fresh
+                    // TX, but must keep the nested failure semantics.
+                    if (!isNestedCommand) {
+                        markEventsFailed(requestId, stackTraceOf(exceptionHolder[0]));
+                    }
                     throw exceptionHolder[0];
                 }
 

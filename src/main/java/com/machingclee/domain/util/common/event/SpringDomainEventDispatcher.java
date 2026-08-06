@@ -5,6 +5,8 @@ import com.machingclee.domain.util.common.MdcContextKeys;
 import com.machingclee.domain.util.common.interfaces.DomainEventDispatcher;
 
 import com.machingclee.domain.util.common.interfaces.EventQueue;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
@@ -16,6 +18,8 @@ import java.util.Map;
 
 @Component
 public class SpringDomainEventDispatcher implements DomainEventDispatcher {
+
+    private static final Logger logger = LoggerFactory.getLogger(SpringDomainEventDispatcher.class);
 
     private final ApplicationEventPublisher applicationEventPublisher;
 
@@ -68,17 +72,33 @@ public class SpringDomainEventDispatcher implements DomainEventDispatcher {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
+                    // Business TX is already committed. Side effects (policies, nested
+                    // commands, SES, etc.) must not throw back into the parent invoker —
+                    // that would mark the parent command/event audit rows as failed even
+                    // though the write succeeded (the whole point of addTransactional /
+                    // POST_COMMIT). Nested command failures still audit themselves.
                     withContext(capturedContext, ctx -> {
                         for (EventWrapper<Object> wrappedEvent : wrappedEvents) {
-                            // Patch requestId into existing context
-                            ExecutionContext existing = wrappedEvent.getContext();
-                            if (existing != null && existing.requestId() == null && ctx.requestId() != null) {
-                                wrappedEvent.setContext(new ExecutionContext(
-                                        existing.userEmail(), ctx.requestId(), existing.originalMDC(),
-                                        existing.commandName()));
+                            try {
+                                // Patch requestId into existing context
+                                ExecutionContext existing = wrappedEvent.getContext();
+                                if (existing != null && existing.requestId() == null && ctx.requestId() != null) {
+                                    wrappedEvent.setContext(new ExecutionContext(
+                                            existing.userEmail(), ctx.requestId(), existing.originalMDC(),
+                                            existing.commandName()));
+                                }
+                                applicationEventPublisher.publishEvent(wrappedEvent);
+                                applicationEventPublisher.publishEvent(wrappedEvent.getEvent());
+                            } catch (Exception e) {
+                                logger.error(
+                                        "POST_COMMIT side effect failed for event {} (requestId={}): {}",
+                                        wrappedEvent.getEvent() != null
+                                                ? wrappedEvent.getEvent().getClass().getSimpleName()
+                                                : "?",
+                                        ctx.requestId(),
+                                        e.getMessage(),
+                                        e);
                             }
-                            applicationEventPublisher.publishEvent(wrappedEvent);
-                            applicationEventPublisher.publishEvent(wrappedEvent.getEvent());
                         }
                     });
                 }

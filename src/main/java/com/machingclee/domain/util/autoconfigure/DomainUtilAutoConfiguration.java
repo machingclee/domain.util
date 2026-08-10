@@ -5,6 +5,7 @@ import com.machingclee.domain.util.common.event.ExternalEventPublisher;
 import com.machingclee.domain.util.common.event.SpringDomainEventDispatcher;
 import com.machingclee.domain.util.common.factory.EntityFactoryService;
 import com.machingclee.domain.util.common.factory.EntityGraphService;
+import com.machingclee.domain.util.common.factory.ServiceGraphService;
 import com.machingclee.domain.util.common.query.DefaultQueryInvoker;
 import com.machingclee.domain.util.common.query.interfaces.QueryHandler;
 import com.machingclee.domain.util.common.query.interfaces.QueryInvoker;
@@ -51,12 +52,18 @@ public class DomainUtilAutoConfiguration {
     }
 
     @Bean
+    public ServiceGraphService serviceGraphService(ApplicationContext context) {
+        return new ServiceGraphService(context);
+    }
+
+    @Bean
     @ConditionalOnBean(AbstractCommandInvoker.class)
     public DocController docController(List<AbstractCommandInvoker> commandInvokers,
                                        ObjectProvider<DefaultQueryInvoker> queryInvokerProvider,
                                        EntityFactoryService entityFactoryService,
-                                       EntityGraphService entityGraphService) {
+                                       EntityGraphService entityGraphService,
+                                       ServiceGraphService serviceGraphService) {
         return new DocController(commandInvokers, queryInvokerProvider.getIfAvailable(),
-                entityFactoryService, entityGraphService);
+                entityFactoryService, entityGraphService, serviceGraphService);
     }
 }

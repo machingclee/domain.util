@@ -8,8 +8,10 @@ import com.machingclee.domain.util.common.dto.FactoryMethodDTO;
 import com.machingclee.domain.util.common.dto.FlowResponseDTO;
 import com.machingclee.domain.util.common.dto.PolicyDetailDTO;
 import com.machingclee.domain.util.common.dto.QueryFlowDTO;
+import com.machingclee.domain.util.common.dto.ServiceNodeDTO;
 import com.machingclee.domain.util.common.factory.EntityFactoryService;
 import com.machingclee.domain.util.common.factory.EntityGraphService;
+import com.machingclee.domain.util.common.factory.ServiceGraphService;
 import com.machingclee.domain.util.common.query.DefaultQueryInvoker;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.servlet.http.HttpServletRequest;
@@ -33,15 +35,18 @@ public class DocController {
     private final DefaultQueryInvoker queryInvoker;
     private final EntityFactoryService entityFactoryService;
     private final EntityGraphService entityGraphService;
+    private final ServiceGraphService serviceGraphService;
 
     public DocController(List<AbstractCommandInvoker> commandInvokers,
                          DefaultQueryInvoker queryInvoker,
                          EntityFactoryService entityFactoryService,
-                         EntityGraphService entityGraphService) {
+                         EntityGraphService entityGraphService,
+                         ServiceGraphService serviceGraphService) {
         this.commandInvokers = commandInvokers;
         this.queryInvoker = queryInvoker;
         this.entityFactoryService = entityFactoryService;
         this.entityGraphService = entityGraphService;
+        this.serviceGraphService = serviceGraphService;
     }
 
     private record APIResponseDTO<T>(boolean success, T result) {
@@ -92,6 +97,14 @@ public class DocController {
                 ? entityGraphService.getEntityDtos()
                 : Map.of();
 
+        // Spring @Service beans (public method signatures), grouped by @BoundedContext
+        List<ServiceNodeDTO> services = serviceGraphService != null
+                ? serviceGraphService.getServiceNodes()
+                : List.of();
+        Map<String, Map<String, Object>> serviceDtos = serviceGraphService != null
+                ? serviceGraphService.getServiceDtos()
+                : Map.of();
+
         // Keep factories/factoryDtos derived from the entity graph for older UIs
         List<FactoryMethodDTO> factories = flattenFactories(entities);
         Map<String, Map<String, Object>> factoryDtos = new LinkedHashMap<>(entityDtos);
@@ -102,7 +115,7 @@ public class DocController {
 
         var combinedFlows = new FlowResponseDTO(
                 commands, policies, schema, dtos, queries, queryDtos,
-                factories, factoryDtos, entities, entityDtos);
+                factories, factoryDtos, entities, entityDtos, services, serviceDtos);
         return APIResponseDTO.ok(combinedFlows);
     }
 

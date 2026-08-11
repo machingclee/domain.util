@@ -21,7 +21,11 @@ import java.util.Set;
 
 /**
  * Uses ASM bytecode scanning to automatically detect which event types a
- * CommandHandler adds to the EventQueue inside its handle() method.
+ * CommandHandler adds to the EventQueue.
+ * <p>
+ * Scans every concrete method on the handler class (not only {@code handle()}),
+ * so events emitted from private helpers such as {@code saveNotificationAndEmit}
+ * are still discovered. Bridge/synthetic methods are skipped.
  * <p>
  * This removes the need to manually override declareEvents().
  */
@@ -36,8 +40,8 @@ public class EventTypeScanner {
     private static final String ADD_ALL_TRANSACTIONAL_METHOD_NAME = "addAllTransactional";
 
     /**
-     * Scan the handle() method of the given handler and return the event classes
-     * instantiated and passed to eventQueue.add().
+     * Scan the given handler and return the event classes instantiated and
+     * passed to {@code eventQueue.add*} — including calls inside private helpers.
      */
     public static List<Class<?>> scanEventTypes(Object handler) {
         Class<?> targetClass = AopUtils.getTargetClass(handler);
@@ -56,11 +60,15 @@ public class EventTypeScanner {
                 @Override
                 public MethodVisitor visitMethod(int access, String name, String descriptor,
                                                  String signature, String[] exceptions) {
-                    // Match the handle() method (not the bridge method)
-                    if ("handle".equals(name) && !descriptor.contains("Object")) {
-                        return new EventCollectingMethodVisitor(eventTypeInternalNames);
+                    // Skip bridges (e.g. handle(EventQueue, Object)) and compiler-generated methods.
+                    // Keep all real methods so private helpers that call eventQueue.add are visible.
+                    if ((access & Opcodes.ACC_BRIDGE) != 0 || (access & Opcodes.ACC_SYNTHETIC) != 0) {
+                        return null;
                     }
-                    return null;
+                    if ("<init>".equals(name) || "<clinit>".equals(name)) {
+                        return null;
+                    }
+                    return new EventCollectingMethodVisitor(eventTypeInternalNames);
                 }
             }, ClassReader.SKIP_FRAMES);
         } catch (Exception e) {

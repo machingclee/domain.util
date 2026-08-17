@@ -6,12 +6,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.context.ApplicationContext;
-import org.springframework.core.annotation.AnnotationUtils;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.InputStream;
-import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.util.*;
@@ -26,22 +24,7 @@ public final class ControllerQueryScanner {
 
     private static final Logger logger = LoggerFactory.getLogger(ControllerQueryScanner.class);
 
-    private static final String ACCESS_TOKEN_ANNOTATION =
-            "com.machingclee.user.v2.core.security.annotation.AccessToken";
-
-    @SuppressWarnings("unchecked")
-    private static final Class<? extends Annotation> ACCESS_TOKEN_CLASS = resolveAccessTokenClass();
-
     private ControllerQueryScanner() {
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Class<? extends Annotation> resolveAccessTokenClass() {
-        try {
-            return (Class<? extends Annotation>) Class.forName(ACCESS_TOKEN_ANNOTATION);
-        } catch (ClassNotFoundException e) {
-            return null;
-        }
     }
 
     public record EndpointInfo(
@@ -70,20 +53,22 @@ public final class ControllerQueryScanner {
         controllers.putAll(context.getBeansWithAnnotation(RestController.class));
         controllers.putAll(context.getBeansWithAnnotation(Controller.class));
 
+        AuthRoleAnnotationConfig authConfig = AuthRoleAnnotationConfig.from(context);
         for (Object controller : controllers.values()) {
             Class<?> targetClass = AopUtils.getTargetClass(controller);
-            scanController(targetClass, result);
+            scanController(targetClass, result, authConfig);
         }
         return result;
     }
 
     private static void scanController(Class<?> targetClass,
-                                        Map<String, EndpointInfo> result) {
+                                        Map<String, EndpointInfo> result,
+                                        AuthRoleAnnotationConfig authConfig) {
         String classPath = extractClassMappingPath(targetClass);
 
         Map<String, MethodEndpointMeta> methodMappings = new LinkedHashMap<>();
         for (Method method : targetClass.getDeclaredMethods()) {
-            MethodEndpointMeta meta = extractMethodMappingInfo(method, targetClass);
+            MethodEndpointMeta meta = extractMethodMappingInfo(method, targetClass, authConfig);
             if (meta != null) {
                 methodMappings.put(method.getName(), meta);
             }
@@ -124,7 +109,8 @@ public final class ControllerQueryScanner {
         return "";
     }
 
-    static MethodEndpointMeta extractMethodMappingInfo(Method method, Class<?> controllerClass) {
+    static MethodEndpointMeta extractMethodMappingInfo(Method method, Class<?> controllerClass,
+            AuthRoleAnnotationConfig authConfig) {
         String httpMethod = null;
         String path = null;
 
@@ -150,7 +136,7 @@ public final class ControllerQueryScanner {
         Operation operation = method.getAnnotation(Operation.class);
         String summary = operation != null ? nullToEmpty(operation.summary()) : "";
         String description = operation != null ? nullToEmpty(operation.description()) : "";
-        List<String> roles = extractAccessTokenRoles(method, controllerClass);
+        List<String> roles = AuthRoleExtractor.extract(method, controllerClass, authConfig);
 
         // Extract @RequestBody parameter class name (if any)
         String requestBodyClassName = null;
@@ -172,27 +158,6 @@ public final class ControllerQueryScanner {
         if (value.length > 0 && !value[0].isEmpty()) return value[0];
         if (path.length > 0 && !path[0].isEmpty()) return path[0];
         return "";
-    }
-
-    static List<String> extractAccessTokenRoles(Method method, Class<?> controllerClass) {
-        if (ACCESS_TOKEN_CLASS == null) return List.of();
-        try {
-            Annotation accessToken = AnnotationUtils.findAnnotation(method, ACCESS_TOKEN_CLASS);
-            if (accessToken == null) accessToken = AnnotationUtils.findAnnotation(controllerClass, ACCESS_TOKEN_CLASS);
-            if (accessToken == null) return List.of();
-            Method roleMethod = ACCESS_TOKEN_CLASS.getMethod("role");
-            Object rolesObj = roleMethod.invoke(accessToken);
-            if (!(rolesObj instanceof Object[] arr) || arr.length == 0) return List.of();
-            List<String> names = new ArrayList<>(arr.length);
-            for (Object role : arr) {
-                if (role instanceof Enum<?> e) names.add(e.name());
-                else if (role != null) names.add(role.toString());
-            }
-            return List.copyOf(names);
-        } catch (ReflectiveOperationException e) {
-            logger.debug("Could not read @AccessToken roles: {}", e.getMessage());
-            return List.of();
-        }
     }
 
     // ── ASM scanning (QueryInvoker variant) ──

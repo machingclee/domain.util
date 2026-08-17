@@ -8,7 +8,7 @@ Maven coordinates:
 <dependency>
     <groupId>com.machingclee</groupId>
     <artifactId>domain-util</artifactId>
-    <version>0.1.15</version>
+    <version>0.1.16</version>
 </dependency>
 ```
 
@@ -40,7 +40,7 @@ There is **no** `@TargetSchema` / `SchemaIdentifier` API. Prefer separate applic
 
 ## Quick consumer setup
 
-1. Add the dependency above (local install or GitHub Packages once published).
+1. Add the dependency above (Maven Central once published — no extra `<repository>` needed).
 
 2. **Create these Spring beans** (names below use a `SomeDomain` placeholder — rename for your domain):
 
@@ -128,30 +128,44 @@ mvn clean install -DskipTests
 ```
 
 
-## Publish to GitHub Packages
+## Publish to Maven Central
 
-`mvn deploy` uploads artifacts to whatever is configured under
-`<distributionManagement>` in `pom.xml` (here: GitHub Packages for
-`machingclee/domain.util`). It does **not** push git commits; that is still
-`git push`.
+Releases go to the [Sonatype Central Publisher Portal](https://central.sonatype.com)
+(namespace `com.machingclee`). Consumers only need the dependency coordinates above.
 
-Prefer CI so no PAT is stored on a laptop:
+### One-time setup
 
-1. Push this repo to GitHub (already: `machingclee/domain.util`).
-2. On a release tag, or via **Actions → Publish to GitHub Packages → Run workflow**:
+1. Verify namespace `com.machingclee` in the Portal (DNS TXT on `machingclee.com`).
+2. Generate a Portal **user token**.
+3. Create a GPG key, upload the public key to a keyserver, and confirm identity.
+4. Put the token in `~/.m2/settings.xml`:
 
-```bash
-git tag v0.1.0-SNAPSHOT
-git push origin v0.1.0-SNAPSHOT
-# or open the workflow_dispatch UI
+```xml
+<server>
+  <id>central</id>
+  <username><!-- portal token username --></username>
+  <password><!-- portal token password --></password>
+</server>
 ```
 
-The workflow `.github/workflows/publish.yml` runs `mvn clean deploy` with
-`GITHUB_TOKEN` (`packages: write`). Local `~/.m2/settings.xml` is optional.
+### Local deploy
 
-Consumers still need a repository block pointing at
-`https://maven.pkg.github.com/machingclee/domain.util` and a token with
-`read:packages` to download (GitHub usually requires auth even for public packages).
+```bash
+export GPG_TTY=$(tty)
+# First time: autoPublish stays false (pom default) — review then Publish in the Portal.
+mvn -B clean deploy -DskipTests
+
+# Later releases can auto-publish:
+# mvn -B clean deploy -DskipTests -Dcentral.autoPublish=true
+```
+
+`mvn deploy` does **not** push git; use `git tag` / `git push` separately.
+
+### CI
+
+`.github/workflows/publish.yml` runs on tags `v*` or **workflow_dispatch**.
+Configure repository secrets: `CENTRAL_TOKEN_USERNAME`, `CENTRAL_TOKEN_PASSWORD`,
+`GPG_PRIVATE_KEY`, `GPG_PASSPHRASE`.
 
 ## Origin
 

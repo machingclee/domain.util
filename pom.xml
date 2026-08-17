@@ -13,7 +13,7 @@
 
     <groupId>com.machingclee</groupId>
     <artifactId>domain-util</artifactId>
-    <version>0.1.15</version>
+    <version>0.1.16</version>
     <name>domain-util</name>
     <description>
         Spring Boot library for a Command to Event to Policy (CQRS-style) pipeline:
@@ -49,6 +49,8 @@
     <properties>
         <java.version>17</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <gpg.keyname>0F69925B825FA48F</gpg.keyname>
+        <central.autoPublish>false</central.autoPublish>
     </properties>
 
     <dependencies>
@@ -165,20 +167,46 @@
                     </execution>
                 </executions>
             </plugin>
+            <!-- Sign main/sources/javadoc JARs + POM for Maven Central. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-gpg-plugin</artifactId>
+                <version>3.2.7</version>
+                <executions>
+                    <execution>
+                        <id>sign-artifacts</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>sign</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <keyname>${gpg.keyname}</keyname>
+                    <!-- Non-interactive CI; also fine locally with gpg-agent. -->
+                    <gpgArguments>
+                        <arg>--pinentry-mode</arg>
+                        <arg>loopback</arg>
+                    </gpgArguments>
+                </configuration>
+            </plugin>
+            <!--
+              Upload to Sonatype Central Publisher Portal (Maven Central).
+              Auth: ~/.m2/settings.xml server id "central" (Portal user token).
+              Does not use <distributionManagement>; that was for GitHub Packages.
+            -->
+            <plugin>
+                <groupId>org.sonatype.central</groupId>
+                <artifactId>central-publishing-maven-plugin</artifactId>
+                <version>0.8.0</version>
+                <extensions>true</extensions>
+                <configuration>
+                    <publishingServerId>central</publishingServerId>
+                    <autoPublish>${central.autoPublish}</autoPublish>
+                    <!-- When autoPublish=true, wait until the component is live. -->
+                    <waitUntil>published</waitUntil>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
-
-    <!--
-      Target for `mvn deploy`. Maven uploads the built JAR (and attached
-      sources/javadoc) to this repository — not to git remotes.
-      Publish via GitHub Actions with GITHUB_TOKEN (see .github/workflows/publish.yml)
-      so we do not need a local ~/.m2/settings.xml PAT.
-    -->
-    <distributionManagement>
-        <repository>
-            <id>github</id>
-            <name>GitHub Packages</name>
-            <url>https://maven.pkg.github.com/machingclee/domain.util</url>
-        </repository>
-    </distributionManagement>
 </project>

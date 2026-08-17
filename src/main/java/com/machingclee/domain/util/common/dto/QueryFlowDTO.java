@@ -16,7 +16,8 @@ import java.util.List;
  * @param path             full request path, or empty if not HTTP-triggered
  * @param summary          OpenAPI {@code @Operation.summary}, or empty
  * @param description      OpenAPI {@code @Operation.description}, or empty
- * @param roles            authorized role names from controller
+ * @param roles            authorized role names from the host auth annotation
+ *                         configured by {@code domain-util.docs.auth-annotation}
  */
 public record QueryFlowDTO(
         QueryPayloadDTO from,

@@ -6,12 +6,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.context.ApplicationContext;
-import org.springframework.core.annotation.AnnotationUtils;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.InputStream;
-import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
 import java.util.*;
 
@@ -24,9 +22,10 @@ import java.util.*;
  * {@code @PatchMapping} annotations to extract HTTP method + path, and
  * {@code @Operation} for OpenAPI summary/description.
  * <p>
- * Also resolves {@code @AccessToken} (from {@code user.v2.core}, if present on
- * the classpath) to surface authorized roles. Method-level annotation wins over
- * class-level, matching {@code AccessTokenHandlerInterceptor}.
+ * Also resolves the host app's auth annotation (configured via
+ * {@code domain-util.docs.auth-annotation}) to surface authorized
+ * roles. Method-level annotation wins over class-level. Empty
+ * {@code auth-annotation} disables role scanning.
  * <p>
  * <b>ASM bytecode scanning</b> traces the method body to find
  * {@code commandInvoker.invoke(new XxxCommand())} calls, using the same
@@ -42,36 +41,18 @@ public final class ControllerCommandScanner {
 
     private static final Logger logger = LoggerFactory.getLogger(ControllerCommandScanner.class);
 
-    /**
-     * Fully-qualified name of user.v2.core's {@code @AccessToken}. Loaded
-     * reflectively so domain.util does not depend on that module.
-     */
-    private static final String ACCESS_TOKEN_ANNOTATION =
-            "com.machingclee.user.v2.core.security.annotation.AccessToken";
-
-    @SuppressWarnings("unchecked")
-    private static final Class<? extends Annotation> ACCESS_TOKEN_CLASS = resolveAccessTokenClass();
-
     private ControllerCommandScanner() {
         // utility class
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Class<? extends Annotation> resolveAccessTokenClass() {
-        try {
-            return (Class<? extends Annotation>) Class.forName(ACCESS_TOKEN_ANNOTATION);
-        } catch (ClassNotFoundException e) {
-            return null;
-        }
     }
 
     /**
      * Holds HTTP endpoint metadata extracted from mapping + OpenAPI annotations.
      * Returned by {@link #scanEndpoints(ApplicationContext)}.
      *
-     * @param roles authorized role names from {@code @AccessToken.role()}, empty
-     *              when the annotation is absent, the module is not on the
-     *              classpath, or no roles are restricted
+     * @param roles authorized role names from the configured auth annotation,
+     *              empty when {@code auth-annotation} is {@code ""}, the
+     *              annotation is absent / not on the classpath, or no roles
+     *              are restricted
      */
     public record EndpointInfo(
             String httpMethod,
@@ -100,9 +81,10 @@ public final class ControllerCommandScanner {
         controllers.putAll(context.getBeansWithAnnotation(RestController.class));
         controllers.putAll(context.getBeansWithAnnotation(Controller.class));
 
+        AuthRoleAnnotationConfig authConfig = AuthRoleAnnotationConfig.from(context);
         for (Object controller : controllers.values()) {
             Class<?> targetClass = AopUtils.getTargetClass(controller);
-            scanController(targetClass, result);
+            scanController(targetClass, result, authConfig);
         }
 
         return result;
@@ -113,15 +95,16 @@ public final class ControllerCommandScanner {
     // -------------------------------------------------------------------------
 
     private static void scanController(Class<?> targetClass,
-                                        Map<String, EndpointInfo> result) {
+                                        Map<String, EndpointInfo> result,
+                                        AuthRoleAnnotationConfig authConfig) {
 
         // 1. Class-level @RequestMapping path (may be empty)
         String classPath = extractClassMappingPath(targetClass);
 
-        // 2. For each method, collect HTTP method + path + @Operation + @AccessToken roles
+        // 2. For each method, collect HTTP method + path + @Operation + auth roles
         Map<String, MethodEndpointMeta> methodMappings = new LinkedHashMap<>();
         for (Method method : targetClass.getDeclaredMethods()) {
-            MethodEndpointMeta meta = extractMethodMappingInfo(method, targetClass);
+            MethodEndpointMeta meta = extractMethodMappingInfo(method, targetClass, authConfig);
             if (meta != null) {
                 methodMappings.put(method.getName(), meta);
             }
@@ -179,10 +162,11 @@ public final class ControllerCommandScanner {
 
     /**
      * Reads the HTTP method, path, OpenAPI {@code @Operation} metadata, and
-     * {@code @AccessToken} roles from a controller method. Returns {@code null}
-     * if the method has no mapping.
+     * configured auth-annotation roles from a controller method. Returns
+     * {@code null} if the method has no mapping.
      */
-    static MethodEndpointMeta extractMethodMappingInfo(Method method, Class<?> controllerClass) {
+    static MethodEndpointMeta extractMethodMappingInfo(Method method, Class<?> controllerClass,
+            AuthRoleAnnotationConfig authConfig) {
         String httpMethod = null;
         String path = null;
 
@@ -230,54 +214,8 @@ public final class ControllerCommandScanner {
         Operation operation = method.getAnnotation(Operation.class);
         String summary = operation != null ? nullToEmpty(operation.summary()) : "";
         String description = operation != null ? nullToEmpty(operation.description()) : "";
-        List<String> roles = extractAccessTokenRoles(method, controllerClass);
+        List<String> roles = AuthRoleExtractor.extract(method, controllerClass, authConfig);
         return new MethodEndpointMeta(httpMethod, path, summary, description, roles);
-    }
-
-    /**
-     * Resolves {@code @AccessToken} roles for a controller method.
-     * Method-level annotation takes priority over class-level (same rule as
-     * {@code AccessTokenHandlerInterceptor}).
-     * <p>
-     * Returns an empty list when:
-     * <ul>
-     *   <li>{@code user.v2.core} is not on the classpath</li>
-     *   <li>neither method nor class has {@code @AccessToken}</li>
-     *   <li>{@code @AccessToken} is present but {@code role()} is empty
-     *       (any authenticated user)</li>
-     * </ul>
-     */
-    static List<String> extractAccessTokenRoles(Method method, Class<?> controllerClass) {
-        if (ACCESS_TOKEN_CLASS == null) {
-            return List.of();
-        }
-        try {
-            // Method-level wins over class-level
-            Annotation accessToken = AnnotationUtils.findAnnotation(method, ACCESS_TOKEN_CLASS);
-            if (accessToken == null) {
-                accessToken = AnnotationUtils.findAnnotation(controllerClass, ACCESS_TOKEN_CLASS);
-            }
-            if (accessToken == null) {
-                return List.of();
-            }
-            Method roleMethod = ACCESS_TOKEN_CLASS.getMethod("role");
-            Object rolesObj = roleMethod.invoke(accessToken);
-            if (!(rolesObj instanceof Object[] arr) || arr.length == 0) {
-                return List.of();
-            }
-            List<String> names = new ArrayList<>(arr.length);
-            for (Object role : arr) {
-                if (role instanceof Enum<?> e) {
-                    names.add(e.name());
-                } else if (role != null) {
-                    names.add(role.toString());
-                }
-            }
-            return List.copyOf(names);
-        } catch (ReflectiveOperationException e) {
-            logger.debug("Could not read @AccessToken roles: {}", e.getMessage());
-            return List.of();
-        }
     }
 
     private static String nullToEmpty(String value) {

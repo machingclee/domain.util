@@ -21,7 +21,8 @@ import java.util.Map;
  * @param path             full request path, or empty if not HTTP-triggered
  * @param summary          OpenAPI {@code @Operation.summary}, or empty if absent
  * @param description      OpenAPI {@code @Operation.description}, or empty if absent
- * @param roles            authorized role names from controller {@code @AccessToken}
+ * @param roles            authorized role names from the host auth annotation
+ *                         configured by {@code domain-util.docs.auth-annotation}
  *                         (method-level preferred over class-level); empty when none
  * @param involvedEntities entities {@code save*}'d by the handler, each with
  *                         related child types actually referenced in bytecode

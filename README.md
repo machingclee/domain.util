@@ -92,7 +92,7 @@ public class CreateCommentHandler implements CommandHandler<CreateCommentCommand
 }
 ```
 
-Queries work the same way: implement `QueryHandler` and inject `QueryInvoker`.
+Queries work the same way: simply inject `QueryHandler` which is already created by the library.
 
 ## 4. `application.yml`
 

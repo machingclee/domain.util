@@ -18,7 +18,7 @@ Java package root: `com.machingclee.domain.util`
 
 - Command / query invokers with handler discovery
 - Domain event dispatch (Spring `ApplicationEventPublisher`)
-- Optional audit event logging hooks
+- Audit event logging (auto-wired once you provide an `AuditEvent` entity + `AuditEventRepository`)
 - Built-in command-flow docs + visualization under `/docs` (when a command invoker bean is present)
 
 ## Requirements
@@ -26,78 +26,216 @@ Java package root: `com.machingclee.domain.util`
 - Java 17+
 - Spring Boot 3.x / 4.x (most Spring deps are `optional` — bring what your app uses)
 
-## Design note: no multi-schema routing
-
-This library is **single-pipeline** by default:
-
-- One `CommandInvoker` registers **all** `CommandHandler` beans in the application context
-- One `DomainEventLogger` persists **all** domain events via its injected repository
-- **Where rows are stored** is decided only by your JPA setup:
-  - entity `@Table(name = "...", schema = "...")` (optional Postgres schema)
-  - which `AuditEventRepository` / datasource you inject
-
-There is **no** `@TargetSchema` / `SchemaIdentifier` API. Prefer separate applications or separate persistence units if you need multiple event stores.
 
 ## Quick consumer setup
 
-1. Add the dependency above (Maven Central once published — no extra `<repository>` needed).
+1. Add the dependency above (Maven Central once published, no extra `<repository>` needed).
 
-2. **Create these Spring beans** (names below use a `SomeDomain` placeholder — rename for your domain):
+2. **Provide an audit entity + repository.** Auto-config then waits for **exactly one**
+   `AuditEventRepository` bean and creates `CommandAuditor`, `CommandInvoker`, and
+   `DomainEventLogger`. There is no separate “wait for entity bean” step — JPA entities
+   are not Spring beans. Spring Data only registers the repository after the matching
+   `@Entity` exists and is in the persistence unit, and the generic
+   `AuditEventRepository<BlogcommentEvent>` already requires that type at compile time.
 
-   | Class | Extends / implements | Role |
-   |-------|----------------------|------|
-   | `SomeDomainEvent` | `AuditEvent` | JPA entity for command/event audit rows (`@Table` decides storage) |
-   | `SomeDomainEventRepository` | `AuditEventRepository<SomeDomainEvent>` | Persistence for audit rows |
-   | `SomeDomainCommandAuditor` | `CustomCommandAuditor<SomeDomainEvent>` | Writes command audit rows |
-   | `SomeDomainCommandInvoker` | `AbstractCommandInvoker<SomeDomainEvent>` | Dispatches all commands |
-   | `SomeDomainDomainEventLogger` | `DomainEventLogger` | Persists all domain events |
+   | You write | Role |
+   |-----------|------|
+   | `BlogcommentEvent` implements `AuditEvent` | JPA entity for command/event audit rows (`@Table` decides storage). Needs a no-arg constructor (Lombok `@NoArgsConstructor` is fine; protected is OK). |
+   | `BlogcommentEventRepository extends AuditEventRepository<BlogcommentEvent>` | Persistence for audit rows. Extra query methods are yours. |
 
-   ```java
-   // SomeDomainCommandAuditor.java
-   @Component
-   public class SomeDomainCommandAuditor extends CustomCommandAuditor<SomeDomainEvent> {
-       public SomeDomainCommandAuditor(SomeDomainEventRepository eventRepository) {
-           super(eventRepository, SomeDomainEvent::new);
-       }
-   }
-   ```
+   Inject `CommandInvoker` (same idea as `QueryInvoker`). Do **not** declare your own
+   auditor / invoker / logger unless you need to override them (`@ConditionalOnMissingBean`)
+   or you have **more than one** `AuditEventRepository` (multi-PU). In that case auto-config
+   stays out of the way and you wire the three beans yourself.
 
-   ```java
-   // SomeDomainCommandInvoker.java
-   @Component
-   public class SomeDomainCommandInvoker extends AbstractCommandInvoker<SomeDomainEvent> {
-       public SomeDomainCommandInvoker(
-               ApplicationContext context,
-               DomainEventDispatcher domainEventDispatcher,
-               PlatformTransactionManager transactionManager,
-               SomeDomainCommandAuditor auditor,
-               SomeDomainEventRepository eventRepository
-       ) {
-           super(
-                   context,
-                   domainEventDispatcher,
-                   transactionManager,
-                   auditor,
-                   eventRepository
-           );
-       }
-   }
-   ```
+   Prefer **one** invoker and **one** event logger per application. Multiple loggers would
+   each receive every event and may double-write.
+
+   Controllers / policies inject the port:
 
    ```java
-   // SomeDomainDomainEventLogger.java
-   @Component
-   public class SomeDomainDomainEventLogger extends DomainEventLogger {
-       public SomeDomainDomainEventLogger(
-               SomeDomainEventRepository eventRepository,
-               ApplicationEventPublisher publisher
-       ) {
-           super(eventRepository, SomeDomainEvent::new, publisher);
-       }
-   }
+   private final CommandInvoker commandInvoker;
    ```
 
-   Prefer **one** invoker and **one** event logger per application. Multiple loggers would each receive every event and may double-write.
+### Entity
+
+```java
+package com.machingclee.blogcomment.common.jpa.entity;
+
+import com.machingclee.domain.util.annotation.BoundedContext;
+import com.machingclee.domain.util.common.interfaces.AuditEvent;
+import jakarta.persistence.*;
+import lombok.AccessLevel;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+/**
+ * Audit trail for commands and domain events.
+ * Physical storage: the "event" table in the "blog_system" Postgres schema
+ * (owned by the Prisma migrations in db/prisma — see db/prisma/schema.prisma).
+ */
+@BoundedContext("Blog Comments")
+@Getter
+@Setter
+@NoArgsConstructor
+@Entity
+@Table(name = "event", schema = "blog_system")
+@EqualsAndHashCode(onlyExplicitlyIncluded = true)
+public class BlogcommentEvent implements AuditEvent {
+
+    @Setter(AccessLevel.NONE)
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @EqualsAndHashCode.Include
+    private Integer id;
+
+    @Column(name = "created_at")
+    private Double createdAt;
+
+    @Column(name = "request_id")
+    private String requestId;
+
+    @Column(name = "event_type")
+    private String eventType;
+
+    @Column(name = "payload", columnDefinition = "TEXT")
+    private String payload;
+
+    @Column(name = "event_order")
+    private Integer eventOrder;
+
+    @Column(name = "request_user_email")
+    private String requestUserEmail;
+
+    @Column(name = "success")
+    private Boolean success;
+
+    @Column(name = "failure_reason", columnDefinition = "TEXT")
+    private String failureReason = "";
+}
+```
+
+### Repository
+
+```java
+package com.machingclee.blogcomment.common.jpa.repository;
+
+import com.machingclee.blogcomment.common.jpa.entity.BlogcommentEvent;
+import com.machingclee.domain.util.common.interfaces.AuditEventRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import java.util.List;
+
+public interface BlogcommentEventRepository extends AuditEventRepository<BlogcommentEvent> {
+
+    List<BlogcommentEvent> findAllByRequestIdAndEventType(String requestId, String eventType);
+
+    @Query("""
+                select e from BlogcommentEvent e
+                where (:requestId IS NULL OR e.requestId = :requestId)
+                  and (:success IS NULL OR e.success = :success)
+                order by e.createdAt desc, e.eventOrder desc
+            """)
+    Page<BlogcommentEvent> findByPageAndLimit(
+            @Param("requestId") String requestId,
+            @Param("success") Boolean success,
+            Pageable pageable);
+}
+```
+
+### Optional override (only if auto-config is not enough)
+
+Skip this when you have a single audit store. Declare these only to customize
+behavior or to wire **multiple** `AuditEventRepository` beans:
+
+```java
+package com.machingclee.blogcomment.common.domainutils.infra;
+
+import com.machingclee.domain.util.common.command.CustomCommandAuditor;
+import com.machingclee.blogcomment.common.jpa.entity.BlogcommentEvent;
+import com.machingclee.blogcomment.common.jpa.repository.BlogcommentEventRepository;
+import org.springframework.stereotype.Component;
+
+/**
+ * Persists one BlogcommentEvent row per command (and related audit helpers)
+ * in REQUIRES_NEW transactions so the trail can survive outer rollbacks.
+ */
+@Component
+public class CommandAuditor extends CustomCommandAuditor<BlogcommentEvent> {
+    public CommandAuditor(BlogcommentEventRepository eventRepository) {
+        super(eventRepository, BlogcommentEvent::new);
+    }
+}
+```
+
+```java
+package com.machingclee.blogcomment.common.domainutils.infra;
+
+import com.machingclee.domain.util.common.command.AbstractCommandInvoker;
+import com.machingclee.domain.util.common.interfaces.DomainEventDispatcher;
+import com.machingclee.blogcomment.common.jpa.entity.BlogcommentEvent;
+import com.machingclee.blogcomment.common.jpa.repository.BlogcommentEventRepository;
+import org.springframework.context.ApplicationContext;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+
+/**
+ * Entry point for executing Commands.
+ * Orchestration (tx, audit, event dispatch) lives in {@link AbstractCommandInvoker}.
+ * This subclass only injects auditor + event repository + transaction manager.
+ * Physical storage is controlled by {@link BlogcommentEvent}'s {@code @Table}.
+ * <p>
+ * Registers all CommandHandler beans in the application context (single pipeline).
+ */
+@Component
+public class CommandInvoker extends AbstractCommandInvoker<BlogcommentEvent> {
+
+    public CommandInvoker(
+            ApplicationContext context,
+            DomainEventDispatcher domainEventDispatcher,
+            PlatformTransactionManager transactionManager,
+            CommandAuditor auditor,
+            BlogcommentEventRepository eventRepository
+    ) {
+        super(
+                context,
+                domainEventDispatcher,
+                transactionManager,
+                auditor,
+                eventRepository
+        );
+    }
+}
+```
+
+```java
+package com.machingclee.blogcomment.common.domainutils.infra;
+
+import com.machingclee.domain.util.common.event.DomainEventLogger;
+import com.machingclee.blogcomment.common.jpa.entity.BlogcommentEvent;
+import com.machingclee.blogcomment.common.jpa.repository.BlogcommentEventRepository;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.stereotype.Component;
+
+/**
+ * Persists domain events raised during command handling.
+ * Prefer a single DomainEventLogger bean per application to avoid double-writes.
+ */
+@Component
+public class BlogcommentDomainEventLogger extends DomainEventLogger {
+    public BlogcommentDomainEventLogger(
+            BlogcommentEventRepository eventRepository,
+            ApplicationEventPublisher publisher
+    ) {
+        super(eventRepository, BlogcommentEvent::new, publisher);
+    }
+}
+```
 
 3. Implement handlers (no schema annotation required):
 

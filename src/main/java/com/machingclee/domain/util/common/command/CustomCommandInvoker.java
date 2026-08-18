@@ -11,14 +11,11 @@ import org.springframework.transaction.PlatformTransactionManager;
  * Concrete, ready-to-use CommandInvoker for consumers that do not need
  * to subclass AbstractCommandInvoker themselves.
  * <p>
- * Consumers only need to provide:
- * - An ApplicationContext
- * - A DomainEventDispatcher
- * - A PlatformTransactionManager
- * - A CommandAuditorPort
- * - An AuditEventRepository (entity {@code @Table} decides physical storage)
+ * Auto-config creates this bean when there is exactly one
+ * {@link AuditEventRepository}. Consumers normally inject {@code CommandInvoker}
+ * and do not declare this class.
  * <p>
- * Example:
+ * Manual wiring (multi-PU / override):
  *
  * <pre>
  * {@code

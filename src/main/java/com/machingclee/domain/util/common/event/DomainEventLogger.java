@@ -28,8 +28,9 @@ import java.util.function.Supplier;
  * by the consumer's {@link AuditEvent} entity (e.g. {@code @Table}) and
  * {@link AuditEventRepository} — not by this library.
  * <p>
- * Register one logger bean per application (or per persistence unit you want
- * events written to):
+ * Auto-config creates one logger when there is a single
+ * {@link AuditEventRepository} bean. Register your own only to override that
+ * bean or to target a specific persistence unit:
  *
  * <pre>
  * {@code

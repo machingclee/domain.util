@@ -1,2 +1,3 @@
 com.machingclee.domain.util.autoconfigure.DomainUtilAutoConfiguration
+com.machingclee.domain.util.autoconfigure.DomainUtilAuditAutoConfiguration
 

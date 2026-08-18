@@ -121,6 +121,25 @@ npm run build
 # then copy dist/ into src/main/resources/META-INF/resources/command-visualization/
 ```
 
+### `application.yml`
+
+For `/docs` to show which roles can invoke each command/query, point the
+scanner at your app's controller auth annotation in `application.yml`:
+
+```yaml
+domain-util:
+  docs:
+    auth-annotation: com.example.security.RequiresRole
+    auth-roles-attribute: role
+```
+
+- `auth-annotation` — fully-qualified name of the annotation on controller
+  methods that declares authorized roles. Required; use `""` to disable role
+  scanning.
+- `auth-roles-attribute` — attribute on that annotation that holds the role
+  list (`Enum[]`, `String[]`, a single `Enum`, or a single `String`). Defaults
+  to `role`.
+
 ## Build locally
 
 ```bash

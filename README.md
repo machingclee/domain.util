@@ -6,7 +6,7 @@ Command → Event pipeline for Spring Boot. Add the dependency, provide an audit
 <dependency>
     <groupId>com.machingclee</groupId>
     <artifactId>domain-util</artifactId>
-    <version>0.2.2</version>
+    <version>0.2.4</version>
 </dependency>
 ```
 

@@ -1,6 +1,5 @@
 package com.machingclee.domain.util.autoconfigure;
 
-import com.machingclee.domain.util.common.command.AbstractCommandInvoker;
 import com.machingclee.domain.util.common.event.ExternalEventPublisher;
 import com.machingclee.domain.util.common.event.SpringDomainEventDispatcher;
 import com.machingclee.domain.util.common.factory.EntityFactoryService;
@@ -9,10 +8,7 @@ import com.machingclee.domain.util.common.factory.ServiceGraphService;
 import com.machingclee.domain.util.common.query.DefaultQueryInvoker;
 import com.machingclee.domain.util.common.query.interfaces.QueryHandler;
 import com.machingclee.domain.util.common.query.interfaces.QueryInvoker;
-import com.machingclee.domain.util.controller.DocController;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.ApplicationContext;
@@ -56,16 +52,5 @@ public class DomainUtilAutoConfiguration {
     @Bean
     public ServiceGraphService serviceGraphService(ApplicationContext context) {
         return new ServiceGraphService(context);
-    }
-
-    @Bean
-    @ConditionalOnBean(AbstractCommandInvoker.class)
-    public DocController docController(List<AbstractCommandInvoker> commandInvokers,
-                                       ObjectProvider<DefaultQueryInvoker> queryInvokerProvider,
-                                       EntityFactoryService entityFactoryService,
-                                       EntityGraphService entityGraphService,
-                                       ServiceGraphService serviceGraphService) {
-        return new DocController(commandInvokers, queryInvokerProvider.getIfAvailable(),
-                entityFactoryService, entityGraphService, serviceGraphService);
     }
 }

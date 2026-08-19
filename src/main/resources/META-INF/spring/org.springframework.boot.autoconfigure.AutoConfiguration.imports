@@ -1,3 +1,4 @@
 com.machingclee.domain.util.autoconfigure.DomainUtilAutoConfiguration
 com.machingclee.domain.util.autoconfigure.DomainUtilAuditAutoConfiguration
+com.machingclee.domain.util.autoconfigure.DomainUtilDocsAutoConfiguration
 

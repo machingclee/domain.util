@@ -6,7 +6,7 @@ Command → Event pipeline for Spring Boot. Add the dependency, provide an audit
 <dependency>
     <groupId>com.machingclee</groupId>
     <artifactId>domain-util</artifactId>
-    <version>0.2.1</version>
+    <version>0.2.2</version>
 </dependency>
 ```
 
@@ -94,9 +94,22 @@ public class CreateCommentHandler implements CommandHandler<CreateCommentCommand
 
 Queries work the same way: simply inject `QueryHandler` which is already created by the library.
 
-## 4. `application.yml`
+## 4. `application.yml` (optional — docs roles only)
 
-Needed so `/docs` can show which roles may call each command/query. Point it at your controller auth annotation:
+This block is **optional**. Omit it entirely unless we want `/docs` to show real controller roles instead of the `@Actor` labels on Command / Query types.
+
+The diagram uses `@Actor("Admin")` by default. If a command or query is invoked from an HTTP endpoint, and that endpoint carries a role-list annotation (for example `@RequiresRole(role = {ADMIN})`), we can point the scanner at that annotation. Non-empty scanned roles then **replace** `@Actor` on that node. Empty / missing roles leave `@Actor` in place.
+
+Startup, `CommandInvoker`, queries, audit rows, and `/docs` itself all work without this YAML. Missing properties are the same as:
+
+```yaml
+domain-util:
+  docs:
+    auth-annotation: ""          # role scanning off
+    auth-roles-attribute: role   # unused until scanning is on
+```
+
+Only add the block when we actually want that replacement:
 
 ```yaml
 domain-util:
@@ -105,9 +118,11 @@ domain-util:
     auth-roles-attribute: role
 ```
 
+`com.example.security.RequiresRole` is a placeholder. Use the real annotation in the consumer app. A marker annotation with no role list (for example `@RequireGoogleAuth`) is not useful here.
+
 | Property | Meaning |
 |---|---|
-| `domain-util.docs.auth-annotation` | Fully-qualified annotation on controller methods that lists authorized roles. Use `""` to skip role scanning. |
-| `domain-util.docs.auth-roles-attribute` | Attribute on that annotation that holds the roles (`Enum[]`, `String[]`, a single `Enum`, or a single `String`). Defaults to `role`. |
+| `domain-util.docs.auth-annotation` | Optional. Fully-qualified controller annotation that lists authorized roles. Omit the property, or set `""`, to skip role scanning and keep `@Actor` on the diagram. |
+| `domain-util.docs.auth-roles-attribute` | Attribute on that annotation that holds the roles (`Enum[]`, `String[]`, a single `Enum`, or a single `String`). Defaults to `role`. Unused when scanning is off. |
 
 Apache License 2.0 — see [LICENSE](LICENSE).

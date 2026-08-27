@@ -149,6 +149,11 @@ class DomainUtilAuditAutoConfigurationTest {
             }
 
             @Override
+            public <R> R invoke(com.machingclee.domain.util.common.interfaces.Command<R> command, String requestId) {
+                return null;
+            }
+
+            @Override
             public com.machingclee.domain.util.common.dto.FlowResponseDTO getFlow() {
                 return null;
             }

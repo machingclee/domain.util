@@ -1,6 +1,5 @@
 package com.machingclee.domain.util.common.command;
 
-
 import com.machingclee.domain.util.annotation.Actor;
 import com.machingclee.domain.util.annotation.BoundedContext;
 import com.machingclee.domain.util.common.MdcContextKeys;
@@ -9,13 +8,7 @@ import com.machingclee.domain.util.common.bytecodescanner.ControllerCommandScann
 import com.machingclee.domain.util.common.bytecodescanner.EntityTypeScanner;
 import com.machingclee.domain.util.common.bytecodescanner.EventTypeScanner;
 import com.machingclee.domain.util.common.bytecodescanner.PolicyCommandScanner;
-import com.machingclee.domain.util.common.dto.CommandEventFlowDTO;
-import com.machingclee.domain.util.common.dto.CommandPayloadDTO;
-import com.machingclee.domain.util.common.dto.EventPayloadDTO;
-import com.machingclee.domain.util.common.dto.FlowResponseDTO;
-import com.machingclee.domain.util.common.dto.InvolvedEntityDTO;
-import com.machingclee.domain.util.common.dto.PolicyDetailDTO;
-import com.machingclee.domain.util.common.dto.PolicyFlowEntryDTO;
+import com.machingclee.domain.util.common.dto.*;
 import com.machingclee.domain.util.common.event.SmartEventQueue;
 import com.machingclee.domain.util.common.event.specialevent.ToBeArrangedEvent;
 import com.machingclee.domain.util.common.interfaces.*;
@@ -51,7 +44,6 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
 
     private static final Logger logger = LoggerFactory.getLogger(AbstractCommandInvoker.class);
 
-
     private final DomainEventDispatcher domainEventDispatcher;
     private final ApplicationContext context;
 
@@ -60,7 +52,10 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
 
     private final List<CommandEventFlowDTO> commandEventFlowList = new ArrayList<>();
     private final Map<String, PolicyDetailDTO> policyDetails = new HashMap<>();
-    /** Nested DTO field schemas keyed by readable type name (e.g. BookingScheduledCar.DTO). */
+    /**
+     * Nested DTO field schemas keyed by readable type name (e.g.
+     * BookingScheduledCar.DTO).
+     */
     private final Map<String, Map<String, Object>> dtoRegistry = new LinkedHashMap<>();
 
     private volatile Map<Class<?>, CommandHandler<?, ?>> handlerMap;
@@ -77,8 +72,7 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
             DomainEventDispatcher domainEventDispatcher,
             PlatformTransactionManager transactionManager,
             CommandAuditorPort<E> auditor,
-            AuditEventRepository<E> eventRepository
-    ) {
+            AuditEventRepository<E> eventRepository) {
         this.domainEventDispatcher = domainEventDispatcher;
         this.context = context;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
@@ -136,7 +130,8 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
         return invoke(handler, command, null);
     }
 
-    public <T extends Command<R>, R> R invoke(CommandHandler<T, R> handler, T command, String overrideRequestId) throws Exception {
+    public <T extends Command<R>, R> R invoke(CommandHandler<T, R> handler, T command, String overrideRequestId)
+            throws Exception {
         String existingRequestId = overrideRequestId != null ? overrideRequestId : MDC.get(MdcContextKeys.REQUEST_ID);
         String requestId = existingRequestId != null ? existingRequestId : UUID.randomUUID().toString();
         boolean isNestedCommand = overrideRequestId == null && MDC.get(MdcContextKeys.REQUEST_ID) != null;
@@ -147,9 +142,11 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
         logger.info("Command: {}, isNested: {}, requestId: {}",
                 command.getClass().getSimpleName(), isNestedCommand, requestId);
 
-        // 2. Log the command in its own committed transaction BEFORE any business logic.
-        //    logCommandInTransaction is @Transactional(REQUIRES_NEW) so it commits independently,
-        //    regardless of what happens in the main transaction.
+        // 2. Log the command in its own committed transaction BEFORE any business
+        // logic.
+        // logCommandInTransaction is @Transactional(REQUIRES_NEW) so it commits
+        // independently,
+        // regardless of what happens in the main transaction.
         E commandEvent = auditor.logCommandInTransaction(command, requestId);
 
         try {
@@ -163,23 +160,24 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
                     result = handler.handle(eventQueue, command);
 
                     // 2. Dispatch — DomainEventLogger @EventListener persists each EventWrapper
-                    //    in its own REQUIRES_NEW transaction, so logs survive any outer rollback.
+                    // in its own REQUIRES_NEW transaction, so logs survive any outer rollback.
                     domainEventDispatcher.dispatch(eventQueue, requestId);
 
                     // 3. Mark command as successful in REQUIRES_NEW.
-                    //    The command audit row was inserted by logCommandInTransaction
-                    //    (REQUIRES_NEW) while the parent TX was already open. Under MySQL
-                    //    REPEATABLE READ the parent snapshot cannot see that row, so
-                    //    findById/setSuccess in the outer PC is a silent no-op. logSuccess
-                    //    mirrors logFailure and commits the flag in a fresh transaction.
-                    auditor.logSuccess(commandEvent.getId());
+                    // The command audit row was inserted by logCommandInTransaction
+                    // (REQUIRES_NEW) while the parent TX was already open. Under MySQL
+                    // REPEATABLE READ the parent snapshot cannot see that row, so
+                    // findById/setSuccess in the outer PC is a silent no-op. logSuccess
+                    // mirrors logFailure and commits the flag in a fresh transaction.
+                    // Skip when an override did not persist the row (id is null).
+                    stampCommandSuccess(commandEvent);
                 } catch (Exception e) {
                     // Stamp failure on this nested command's audit row only.
                     // Do NOT call markEventsFailed(requestId, ...) here — the
                     // parent command's events were already committed with
                     // success=true and must never be retroactively failed
                     // by a downstream nested command failure.
-                    auditor.logFailure(commandEvent.getId(), stackTraceOf(e));
+                    stampCommandFailure(commandEvent, e);
                     throw e;
                 }
             } else {
@@ -196,12 +194,12 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
                                 resultHolder[0] = handler.handle(eventQueue, command);
 
                                 // 2. Dispatch — DomainEventLogger @EventListener persists each
-                                //    EventWrapper in its own REQUIRES_NEW transaction.
+                                // EventWrapper in its own REQUIRES_NEW transaction.
                                 domainEventDispatcher.dispatch(eventQueue, requestId);
 
-                                // 3. Mark command as successful (inside the main transaction)
-                                commandEvent.setSuccess(true);
-                                eventRepository.save(commandEvent);
+                                // 3. Mark command as successful via the auditor (REQUIRES_NEW)
+                                // so this path cannot bypass an override that skipped save.
+                                stampCommandSuccess(commandEvent);
                             } catch (Exception e) {
                                 exceptionHolder[0] = e;
                                 status.setRollbackOnly();
@@ -213,7 +211,8 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
                         return null;
                     });
                 } catch (org.springframework.transaction.UnexpectedRollbackException ignored) {
-                    // transaction was rolled back via setRollbackOnly() — real cause is in exceptionHolder
+                    // transaction was rolled back via setRollbackOnly() — real cause is in
+                    // exceptionHolder
                 } catch (RuntimeException e) {
                     // flush-time failures (e.g. ConstraintViolationException during commit)
                     // happen outside the inner try/catch — capture them so the failure
@@ -223,7 +222,7 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
 
                 if (exceptionHolder[0] != null) {
                     // Stamp failure on this command's audit row only.
-                    auditor.logFailure(commandEvent.getId(), stackTraceOf(exceptionHolder[0]));
+                    stampCommandFailure(commandEvent, exceptionHolder[0]);
                     // markEventsFailed is only for true top-level failures.
                     // Nested commands (same requestId from MDC, e.g. policy-dispatched
                     // notification after a POST_COMMIT event) must not retroactively
@@ -236,7 +235,6 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
                     }
                     throw exceptionHolder[0];
                 }
-
 
                 result = resultHolder[0];
             }
@@ -263,11 +261,29 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
     // -------------------------------------------------------------------------
     // Failure helpers
 
+    private void stampCommandSuccess(E commandEvent) {
+        Integer id = commandEvent.getId();
+        if (id == null) {
+            return;
+        }
+        auditor.logSuccess(id);
+    }
+
+    private void stampCommandFailure(E commandEvent, Throwable error) {
+        Integer id = commandEvent.getId();
+        if (id == null) {
+            return;
+        }
+        auditor.logFailure(id, stackTraceOf(error));
+    }
+
     /**
-     * Converts a Throwable's full stack trace to a String for storage in failure_reason.
+     * Converts a Throwable's full stack trace to a String for storage in
+     * failure_reason.
      */
     private static String stackTraceOf(Throwable t) {
-        if (t == null) return "";
+        if (t == null)
+            return "";
         java.io.StringWriter sw = new java.io.StringWriter();
         t.printStackTrace(new java.io.PrintWriter(sw));
         return sw.toString();
@@ -275,13 +291,14 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
 
     /**
      * Marks all domain-event records that were committed by DomainEventLogger
-     * for this requestId as failed.  Runs in a fresh REQUIRES_NEW transaction
+     * for this requestId as failed. Runs in a fresh REQUIRES_NEW transaction
      * so it always commits even when the caller is in a rolled-back context.
      */
     private void markEventsFailed(String requestId, String reason) {
         requiresNewTemplate.execute(status -> {
             eventRepository.findAllByRequestId(requestId).forEach(evt -> {
-                if (Boolean.FALSE.equals(evt.getSuccess())) return; // command record — already handled
+                if (Boolean.FALSE.equals(evt.getSuccess()))
+                    return; // command record — already handled
                 evt.setSuccess(false);
                 evt.setFailureReason(reason);
                 eventRepository.save(evt);
@@ -322,8 +339,8 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
         Map<Class<?>, CommandHandler<?, ?>> map = new HashMap<>();
 
         // 2. Scan controller endpoints — map HTTP endpoints to Commands
-        Map<String, ControllerCommandScanner.EndpointInfo> endpointMap =
-                ControllerCommandScanner.scanEndpoints(context);
+        Map<String, ControllerCommandScanner.EndpointInfo> endpointMap = ControllerCommandScanner
+                .scanEndpoints(context);
         logger.info("[{}] Auto-detected {} controller endpoint(s)",
                 getClass().getSimpleName(), endpointMap.size());
 
@@ -343,8 +360,7 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
                     handler.getClass().getSimpleName(), commandClass.getSimpleName());
 
             List<Class<?>> scannedEvents = EventTypeScanner.scanEventTypes(handler);
-            List<EventPayloadDTO> eventPayloads =
-                    EventTypeScanner.buildEventPayloads(scannedEvents, dtoRegistry);
+            List<EventPayloadDTO> eventPayloads = EventTypeScanner.buildEventPayloads(scannedEvents, dtoRegistry);
             CommandPayloadDTO commandPayload = new CommandPayloadDTO(
                     commandClass.getSimpleName(),
                     EventTypeScanner.buildPayloadSchema(commandClass, dtoRegistry));
@@ -394,16 +410,19 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
             for (Method method : AopUtils.getTargetClass(policy).getDeclaredMethods()) {
                 boolean isEventListener = method.isAnnotationPresent(
                         org.springframework.context.event.EventListener.class);
-                if (!isEventListener) continue;
+                if (!isEventListener)
+                    continue;
 
                 Invariant invariantAnnotation = method.getAnnotation(Invariant.class);
 
                 Class<?>[] paramTypes = method.getParameterTypes();
                 Class<?> firstParam = paramTypes.length > 0 ? paramTypes[0] : null;
                 String fromEvent = (firstParam != null && firstParam != ToBeArrangedEvent.class)
-                        ? firstParam.getSimpleName() : null;
+                        ? firstParam.getSimpleName()
+                        : null;
                 String invariant = (invariantAnnotation != null && invariantAnnotation.value().length > 0)
-                        ? stripCommonLeadingWhitespace(invariantAnnotation.value()[0]) : null;
+                        ? stripCommonLeadingWhitespace(invariantAnnotation.value()[0])
+                        : null;
 
                 List<Class<?>> nextCommands = scannedCommands.getOrDefault(method.getName(), List.of());
                 if (nextCommands.size() > 1) {
@@ -425,7 +444,6 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
             policyDetails.put(policyName, new PolicyDetailDTO(flows));
         }
     }
-
 
     private Class<?> extractCommandClass(CommandHandler<?, ?> handler) {
         Class<?> targetClass = AopUtils.getTargetClass(handler);
@@ -450,7 +468,8 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
      * Then subtract m spaces from the start of each non-blank line.
      */
     static String stripCommonLeadingWhitespace(String s) {
-        if (s == null || s.isEmpty()) return s;
+        if (s == null || s.isEmpty())
+            return s;
 
         String[] lines = s.split("\n", -1);
 
@@ -462,16 +481,19 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
                 while (indent < line.length() && line.charAt(indent) == ' ') {
                     indent++;
                 }
-                if (indent < minIndent) minIndent = indent;
+                if (indent < minIndent)
+                    minIndent = indent;
             }
         }
 
-        if (minIndent == Integer.MAX_VALUE || minIndent == 0) return s;
+        if (minIndent == Integer.MAX_VALUE || minIndent == 0)
+            return s;
 
         // --- strip exactly minIndent spaces from each non-blank line ---
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < lines.length; i++) {
-            if (i > 0) sb.append('\n');
+            if (i > 0)
+                sb.append('\n');
             String line = lines[i];
             if (!line.isBlank()) {
                 int skip = Math.min(minIndent, line.length());

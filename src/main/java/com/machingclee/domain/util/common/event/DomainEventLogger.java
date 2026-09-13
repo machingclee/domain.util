@@ -3,6 +3,8 @@ package com.machingclee.domain.util.common.event;
 import com.machingclee.domain.util.common.ExecutionContext;
 import com.machingclee.domain.util.common.MdcContextKeys;
 import com.machingclee.domain.util.common.RequestSequence;
+import com.machingclee.domain.util.common.audit.EventAuditConfiguration;
+import com.machingclee.domain.util.common.audit.EventAuditRecord;
 import com.machingclee.domain.util.common.event.enums.DispatchTiming;
 import com.machingclee.domain.util.common.interfaces.AuditEvent;
 import com.machingclee.domain.util.common.interfaces.AuditEventRepository;
@@ -14,8 +16,7 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
@@ -24,7 +25,8 @@ import java.util.function.Supplier;
 /**
  * Persists domain events using the injected audit repository.
  * <p>
- * Physical storage (table name, Postgres schema, datasource) is decided entirely
+ * Physical storage (table name, Postgres schema, datasource) is decided
+ * entirely
  * by the consumer's {@link AuditEvent} entity (e.g. {@code @Table}) and
  * {@link AuditEventRepository} — not by this library.
  * <p>
@@ -37,7 +39,7 @@ import java.util.function.Supplier;
  * @Component
  * public class SomeDomainDomainEventLogger extends DomainEventLogger {
  *     public SomeDomainDomainEventLogger(SomeDomainEventRepository repo,
- *                                        ApplicationEventPublisher publisher) {
+ *             ApplicationEventPublisher publisher) {
  *         super(repo, SomeDomainEvent::new, publisher);
  *     }
  * }
@@ -57,20 +59,33 @@ public class DomainEventLogger {
     private final AuditEventRepository<AuditEvent> eventRepository;
     private final Supplier<AuditEvent> eventFactory;
     private final ApplicationEventPublisher applicationEventPublisher;
+    private final EventAuditConfiguration eventAudit;
+
+    public DomainEventLogger(AuditEventRepository<? extends AuditEvent> eventRepository,
+            Supplier<? extends AuditEvent> eventFactory,
+            ApplicationEventPublisher applicationEventPublisher) {
+        this(eventRepository, eventFactory, applicationEventPublisher, new EventAuditConfiguration(), null);
+    }
 
     @SuppressWarnings("unchecked")
     public DomainEventLogger(AuditEventRepository<? extends AuditEvent> eventRepository,
-                             Supplier<? extends AuditEvent> eventFactory,
-                             ApplicationEventPublisher applicationEventPublisher) {
+            Supplier<? extends AuditEvent> eventFactory,
+            ApplicationEventPublisher applicationEventPublisher,
+            EventAuditConfiguration eventAudit,
+            PlatformTransactionManager transactionManager) {
         this.eventRepository = (AuditEventRepository<AuditEvent>) eventRepository;
         this.eventFactory = (Supplier<AuditEvent>) eventFactory;
         this.applicationEventPublisher = applicationEventPublisher;
+        this.eventAudit = eventAudit;
+        eventAudit.bindOriginalAuditHandler(record ->
+                this.eventRepository.save(record.getAuditEvent()));
+        eventAudit.bindTransactionManager(transactionManager);
     }
 
     @EventListener
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void recordSynchronousEvent(EventWrapper<Object> wrapperEvent) {
-        if (wrapperEvent.getTiming() != DispatchTiming.IMMEDIATE) return;
+        if (wrapperEvent.getTiming() != DispatchTiming.IMMEDIATE)
+            return;
         try {
             persistEventWithPreciseTiming(wrapperEvent);
         } catch (Exception e) {
@@ -79,7 +94,7 @@ public class DomainEventLogger {
     }
 
     /**
-     * Listens for post-commit EventWrappers.  The {@code fallbackExecution = true}
+     * Listens for post-commit EventWrappers. The {@code fallbackExecution = true}
      * is required so that events dispatched inside a
      * {@code TransactionSynchronization.afterCommit()} callback (where there is
      * no longer an active transaction) are still recorded — without it Spring
@@ -94,11 +109,10 @@ public class DomainEventLogger {
      * (MDC or {@link ExecutionContext}), so order stays correct even when MDC
      * has already been cleared by the time this listener runs.
      */
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT,
-                                fallbackExecution = true)
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void recordTransactionalEvent(EventWrapper<Object> wrapperEvent) {
-        if (wrapperEvent.getTiming() != DispatchTiming.POST_COMMIT) return;
+        if (wrapperEvent.getTiming() != DispatchTiming.POST_COMMIT)
+            return;
         try {
             persistEventWithPreciseTiming(wrapperEvent);
         } catch (Exception e) {
@@ -106,7 +120,7 @@ public class DomainEventLogger {
         }
     }
 
-    private void persistEventWithPreciseTiming(EventWrapper<Object> wrappedEvent) {
+    private void persistEventWithPreciseTiming(EventWrapper<Object> wrappedEvent) throws Exception {
         Object event = wrappedEvent.getEvent();
         ExecutionContext ctx = wrappedEvent.getContext();
 
@@ -135,7 +149,7 @@ public class DomainEventLogger {
         eventToSave.setEventOrder(RequestSequence.next(requestId.isBlank() ? null : requestId));
         eventToSave.setSuccess(true);
 
-        eventRepository.save(eventToSave);
+        eventAudit.execute(new EventAuditRecord(event, requestId, eventToSave, wrappedEvent));
         logger.info("AUDIT: Event [{}] saved with createdAt={}", commandAwareEventType, uniqueTimestamp);
     }
 

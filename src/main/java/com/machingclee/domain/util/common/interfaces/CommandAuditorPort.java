@@ -5,12 +5,17 @@ package com.machingclee.domain.util.common.interfaces;
  * Generic type E is the audit event entity persisted for commands/events.
  */
 public interface CommandAuditorPort<E extends AuditEvent> {
-    <T> E logCommandInTransaction(T command, String requestId) throws Exception;
+    /**
+     * Persists the command audit row in its own transaction. Failures are
+     * swallowed so they cannot abort {@code CommandHandler} execution.
+     */
+    <T> E logCommandInTransaction(T command, String requestId);
 
     /**
-     * Logs a domain event in the current (mandatory) transaction.
+     * Logs a domain event in its own persist transaction. Failures are
+     * swallowed so they cannot abort command execution.
      */
-    <T> E logEventInTransaction(T event, String requestId) throws Exception;
+    <T> E logEventInTransaction(T event, String requestId);
 
     void logSuccess(int eventId);
 

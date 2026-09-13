@@ -1,5 +1,7 @@
 package com.machingclee.domain.util.autoconfigure;
 
+import com.machingclee.domain.util.common.audit.CommandAuditConfiguration;
+import com.machingclee.domain.util.common.audit.EventAuditConfiguration;
 import com.machingclee.domain.util.common.command.AbstractCommandInvoker;
 import com.machingclee.domain.util.common.command.CustomCommandAuditor;
 import com.machingclee.domain.util.common.command.CustomCommandInvoker;
@@ -47,10 +49,33 @@ import java.util.function.Supplier;
 public class DomainUtilAuditAutoConfiguration {
 
     @Bean
+    @ConditionalOnMissingBean
+    public CommandAuditConfiguration commandAuditConfiguration() {
+        return new CommandAuditConfiguration();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public EventAuditConfiguration eventAuditConfiguration() {
+        return new EventAuditConfiguration();
+    }
+
+    @Bean
     @ConditionalOnMissingBean(CommandAuditorPort.class)
     @SuppressWarnings({"rawtypes", "unchecked"})
-    public CommandAuditorPort<?> commandAuditorPort(AuditEventRepository<?> eventRepository) {
-        return new CustomCommandAuditor(eventRepository, eventFactory(eventRepository));
+    public CommandAuditorPort<?> commandAuditorPort(
+            AuditEventRepository<?> eventRepository,
+            CommandAuditConfiguration commandAuditConfiguration,
+            EventAuditConfiguration eventAuditConfiguration,
+            PlatformTransactionManager transactionManager
+    ) {
+        return new CustomCommandAuditor(
+                eventRepository,
+                eventFactory(eventRepository),
+                commandAuditConfiguration,
+                eventAuditConfiguration,
+                transactionManager
+        );
     }
 
     @Bean
@@ -75,9 +100,17 @@ public class DomainUtilAuditAutoConfiguration {
     @ConditionalOnMissingBean(DomainEventLogger.class)
     public DomainEventLogger domainEventLogger(
             AuditEventRepository<?> eventRepository,
-            ApplicationEventPublisher publisher
+            ApplicationEventPublisher publisher,
+            EventAuditConfiguration eventAuditConfiguration,
+            PlatformTransactionManager transactionManager
     ) {
-        return new DomainEventLogger(eventRepository, eventFactory(eventRepository), publisher);
+        return new DomainEventLogger(
+                eventRepository,
+                eventFactory(eventRepository),
+                publisher,
+                eventAuditConfiguration,
+                transactionManager
+        );
     }
 
     private static Supplier<AuditEvent> eventFactory(AuditEventRepository<?> eventRepository) {

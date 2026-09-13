@@ -1,5 +1,7 @@
 package com.machingclee.domain.util.autoconfigure;
 
+import com.machingclee.domain.util.common.audit.CommandAuditConfiguration;
+import com.machingclee.domain.util.common.audit.EventAuditConfiguration;
 import com.machingclee.domain.util.common.command.AbstractCommandInvoker;
 import com.machingclee.domain.util.common.command.CustomCommandInvoker;
 import com.machingclee.domain.util.common.event.DomainEventLogger;
@@ -58,6 +60,21 @@ class DomainUtilAuditAutoConfigurationTest {
                     assertThat(context).hasSingleBean(CommandInvoker.class);
                     assertThat(context).hasSingleBean(AbstractCommandInvoker.class);
                     assertThat(context).hasSingleBean(DomainEventLogger.class);
+                    assertThat(context).hasSingleBean(CommandAuditConfiguration.class);
+                    assertThat(context).hasSingleBean(EventAuditConfiguration.class);
+                });
+    }
+
+    @Test
+    void usesUserCommandAuditConfigurationBean() {
+        runner.withUserConfiguration(
+                        TransactionManagerConfig.class,
+                        SingleRepoConfig.class,
+                        UserCommandAuditConfig.class)
+                .run(context -> {
+                    assertThat(context).hasSingleBean(CommandAuditConfiguration.class);
+                    assertThat(context.getBean(CommandAuditConfiguration.class))
+                            .isSameAs(UserCommandAuditConfig.MARKER);
                 });
     }
 
@@ -131,6 +148,16 @@ class DomainUtilAuditAutoConfigurationTest {
         @Bean
         OtherEventRepository otherEventRepository() {
             return proxy(OtherEventRepository.class);
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class UserCommandAuditConfig {
+        static final CommandAuditConfiguration MARKER = new CommandAuditConfiguration();
+
+        @Bean
+        CommandAuditConfiguration commandAuditConfiguration() {
+            return MARKER;
         }
     }
 

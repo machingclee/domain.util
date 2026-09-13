@@ -1,6 +1,5 @@
 package com.machingclee.domain.util.common.interfaces;
 
-
 import com.machingclee.domain.util.common.dto.FlowResponseDTO;
 
 public interface CommandInvoker {

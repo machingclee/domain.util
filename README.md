@@ -6,7 +6,7 @@ Command → Event pipeline for Spring Boot. Add the dependency, provide an audit
 <dependency>
     <groupId>com.machingclee</groupId>
     <artifactId>domain-util</artifactId>
-    <version>0.2.6</version>
+    <version>0.2.7</version>
 </dependency>
 ```
 
@@ -63,7 +63,103 @@ public interface BlogcommentEventRepository extends AuditEventRepository<Blogcom
 
 With exactly one `AuditEventRepository` bean, the library creates `CommandInvoker` for you. Inject that — do not subclass the auditor, invoker, or event logger.
 
-## 3. Use it in a controller
+## 3. Customize command / event audit writes
+
+The library also creates empty `CommandAuditConfiguration` and `EventAuditConfiguration` beans. Override either by declaring a `@Configuration` subclass. Auto-config skips its default when yours is present (`@ConditionalOnMissingBean`).
+
+Handlers wrap `eventRepository.save` — they are **not** `CommandHandler`. They receive a record envelope, not the command/event itself:
+
+| Record | Fields |
+| --- | --- |
+| `CommandAuditRecord` | `getCommand()`, `getRequestId()`, `getAuditEvent()` |
+| `EventAuditRecord` | `getDomainEvent()`, `getRequestId()`, `getAuditEvent()`, `getWrapper()` |
+
+`getAuditEvent()` is the row about to be saved. Mutate that instance; do not replace it.
+
+Pipeline (same thread, **not** a new thread):
+
+```
+REQUIRES_NEW pres
+  → persist TX (JOIN pres → original/override save → JOIN posts)
+  → REQUIRES_NEW posts
+```
+
+`AuditTx`:
+
+| Mode | Meaning |
+| --- | --- |
+| `JOIN` (pre default) | Same TX as `eventRepository.save`. A throw rolls back the audit row. |
+| `REQUIRES_NEW` (post default) | Own TX. A throw is logged and swallowed. |
+
+Audit failures never abort `CommandHandler`. A `JOIN` throw only rolls back the audit insert; invoke continues.
+
+### Wrap save (pre / post)
+
+```java
+@Configuration
+public class CustomCommandAuditConfiguration extends CommandAuditConfiguration {
+
+    public CustomCommandAuditConfiguration() {
+        addPreAuditHandler(record -> {
+            // JOIN: mutate the row atomically with save
+            record.getAuditEvent().setPayload(/* redacted */);
+        });
+
+        addPostAuditHandler(record -> {
+            // REQUIRES_NEW: extra sink; failure does not undo the row
+        });
+
+        addPostAuditHandler(record -> {
+            // JOIN: after save, still in persist TX — throw rolls back the row
+        }, AuditTx.JOIN);
+    }
+}
+```
+
+```java
+@Configuration
+public class CustomEventAuditConfiguration extends EventAuditConfiguration {
+
+    public CustomEventAuditConfiguration() {
+        addPreAuditHandler(record -> {
+            Object domainEvent = record.getDomainEvent();
+        });
+        addPostAuditHandler(record -> { /* metrics / extra sink */ });
+    }
+}
+```
+
+### Replace save (override)
+
+`overrideAuditHandler` **replaces** original. Call `getOriginalAuditHandler()` to still persist. Skip that call to skip DB.
+
+```java
+@Configuration
+public class CustomCommandAuditConfiguration extends CommandAuditConfiguration {
+
+    public CustomCommandAuditConfiguration() {
+        overrideAuditHandler(record -> {
+            getOriginalAuditHandler().handle(record); // identity = default save
+        });
+    }
+}
+```
+
+```java
+@Configuration
+public class CustomEventAuditConfiguration extends EventAuditConfiguration {
+
+    public CustomEventAuditConfiguration() {
+        overrideAuditHandler(record -> {
+            // skip repository.save — original is not invoked
+        });
+    }
+}
+```
+
+`getOriginalAuditHandler()` is only `eventRepository.save(record.getAuditEvent())`. It does not re-run pre/post.
+
+## 4. Use it in a controller
 
 ```java
 @RestController
@@ -94,7 +190,7 @@ public class CreateCommentHandler implements CommandHandler<CreateCommentCommand
 
 Queries work the same way: simply inject `QueryHandler` which is already created by the library.
 
-## 4. `application.yml` (optional — docs roles only)
+## 5. `application.yml` (optional — docs roles only)
 
 This block is **optional**. Omit it entirely unless we want `/docs` to show real controller roles instead of the `@Actor` labels on Command / Query types.
 

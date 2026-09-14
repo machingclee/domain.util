@@ -82,12 +82,12 @@ public class CustomAuditConfiguration extends AuditConfiguration {
     public CustomAuditConfiguration() {
         // --- per command-audit row (written before the business TX) ---
         addPreCommandAuditHandler(record -> {
-            // JOIN (default): mutate the row atomically with save
+            // JOIN: mutate the row atomically with save
             record.getAuditEvent().setPayload(/* redacted */);
-        });
+        }, AuditTx.JOIN);
         addPostCommandAuditHandler(record -> {
-            // REQUIRES_NEW (default): extra sink; throw does not undo the row
-        });
+            // REQUIRES_NEW: extra sink; throw does not undo the row
+        }, AuditTx.REQUIRES_NEW);
         addPostCommandAuditHandler(record -> {
             // JOIN: still in persist TX — throw rolls back the command audit row
         }, AuditTx.JOIN);
@@ -95,8 +95,8 @@ public class CustomAuditConfiguration extends AuditConfiguration {
         // --- per domain-event audit row ---
         addPreEventAuditHandler(record -> {
             Object domainEvent = record.getDomainEvent();
-        });
-        addPostEventAuditHandler(record -> { /* metrics / extra sink */ });
+        }, AuditTx.JOIN);
+        addPostEventAuditHandler(record -> { /* metrics / extra sink */ }, AuditTx.REQUIRES_NEW);
 
         // --- once per top-level invoke, after TX + failure stamps ---
         addAfterTransactionHandler(this::onRequestFinished);
@@ -135,10 +135,12 @@ REQUIRES_NEW pres
   → REQUIRES_NEW posts
 ```
 
+Every `addPre*` / `addPost*` call must pass `AuditTx`. There is no default.
+
 | `AuditTx` | Meaning |
 | --- | --- |
-| `JOIN` (pre default) | Same TX as `eventRepository.save`. A throw rolls back that audit row. |
-| `REQUIRES_NEW` (post default) | Own TX. A throw is logged and swallowed. |
+| `JOIN` | Same TX as `eventRepository.save`. A throw rolls back that audit row. |
+| `REQUIRES_NEW` | Own TX. A throw is logged and swallowed. |
 
 Audit failures never abort `CommandHandler`. A `JOIN` throw only rolls back the audit insert; invoke continues.
 

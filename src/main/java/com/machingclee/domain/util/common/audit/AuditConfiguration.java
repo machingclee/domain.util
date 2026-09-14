@@ -25,10 +25,10 @@ import java.util.Objects;
  * @Bean
  * AuditConfiguration auditConfiguration() {
  *     AuditConfiguration config = new AuditConfiguration();
- *     config.addPreCommandAuditHandler(record -> { });
- *     config.addPostCommandAuditHandler(record -> { });
- *     config.addPreEventAuditHandler(record -> { });
- *     config.addPostEventAuditHandler(record -> { });
+ *     config.addPreCommandAuditHandler(record -> { }, AuditTx.JOIN);
+ *     config.addPostCommandAuditHandler(record -> { }, AuditTx.REQUIRES_NEW);
+ *     config.addPreEventAuditHandler(record -> { }, AuditTx.JOIN);
+ *     config.addPostEventAuditHandler(record -> { }, AuditTx.REQUIRES_NEW);
  *     config.addAfterTransactionHandler(record -> {
  *         List<AuditEvent> rows = record.getEvents();
  *     });
@@ -65,21 +65,13 @@ public class AuditConfiguration {
     // Command row handlers
     // -------------------------------------------------------------------------
 
-    public AuditConfiguration addPreCommandAuditHandler(AuditHandler<CommandAuditRecord> handler) {
-        return addPreCommandAuditHandler(handler, AuditTx.JOIN);
-    }
-
     public AuditConfiguration addPreCommandAuditHandler(AuditHandler<CommandAuditRecord> handler, AuditTx tx) {
-        commands.addPre(handler, tx);
+        commands.addPre(handler, Objects.requireNonNull(tx, "command pre audit tx"));
         return this;
     }
 
-    public AuditConfiguration addPostCommandAuditHandler(AuditHandler<CommandAuditRecord> handler) {
-        return addPostCommandAuditHandler(handler, AuditTx.REQUIRES_NEW);
-    }
-
     public AuditConfiguration addPostCommandAuditHandler(AuditHandler<CommandAuditRecord> handler, AuditTx tx) {
-        commands.addPost(handler, tx);
+        commands.addPost(handler, Objects.requireNonNull(tx, "command post audit tx"));
         return this;
     }
 
@@ -116,21 +108,13 @@ public class AuditConfiguration {
     // Event row handlers
     // -------------------------------------------------------------------------
 
-    public AuditConfiguration addPreEventAuditHandler(AuditHandler<EventAuditRecord> handler) {
-        return addPreEventAuditHandler(handler, AuditTx.JOIN);
-    }
-
     public AuditConfiguration addPreEventAuditHandler(AuditHandler<EventAuditRecord> handler, AuditTx tx) {
-        events.addPre(handler, tx);
+        events.addPre(handler, Objects.requireNonNull(tx, "event pre audit tx"));
         return this;
     }
 
-    public AuditConfiguration addPostEventAuditHandler(AuditHandler<EventAuditRecord> handler) {
-        return addPostEventAuditHandler(handler, AuditTx.REQUIRES_NEW);
-    }
-
     public AuditConfiguration addPostEventAuditHandler(AuditHandler<EventAuditRecord> handler, AuditTx tx) {
-        events.addPost(handler, tx);
+        events.addPost(handler, Objects.requireNonNull(tx, "event post audit tx"));
         return this;
     }
 
@@ -290,13 +274,13 @@ public class AuditConfiguration {
         private void addPre(AuditHandler<T> handler, AuditTx tx) {
             preHandlers.add(new RegisteredHandler<>(
                     Objects.requireNonNull(handler, name + " pre audit handler"),
-                    tx != null ? tx : AuditTx.JOIN));
+                    tx));
         }
 
         private void addPost(AuditHandler<T> handler, AuditTx tx) {
             postHandlers.add(new RegisteredHandler<>(
                     Objects.requireNonNull(handler, name + " post audit handler"),
-                    tx != null ? tx : AuditTx.REQUIRES_NEW));
+                    tx));
         }
 
         private void override(AuditHandler<T> handler) {

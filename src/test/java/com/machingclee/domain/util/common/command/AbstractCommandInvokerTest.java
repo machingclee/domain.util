@@ -72,6 +72,50 @@ class AbstractCommandInvokerTest {
     }
 
     @Test
+    void failureReasonKeepsAppFramesAndDropsFrameworkNoise() {
+        RecordingRepo repo = new RecordingRepo();
+        AuditConfiguration audit = new AuditConfiguration();
+        AtomicReference<AfterTransactionRecord> seen = new AtomicReference<>();
+        audit.addAfterTransactionHandler(seen::set);
+
+        RuntimeException failure = new RuntimeException("No multiple selections are allowed");
+        failure.setStackTrace(new StackTraceElement[]{
+                new StackTraceElement("com.machingclee.booking.policy.BookingPolicy",
+                        "preventSameDayDuplicateCarBookingOn", "BookingPolicy.java", 150),
+                new StackTraceElement("org.springframework.security.web.FilterChainProxy",
+                        "doFilter", "FilterChainProxy.java", 237),
+                new StackTraceElement("org.apache.catalina.core.StandardEngineValve",
+                        "invoke", "StandardEngineValve.java", 72),
+                new StackTraceElement("com.machingclee.controller.BookingController",
+                        "assignCustomerToScheduledCar", "BookingController.java", 248)
+        });
+
+        CustomCommandAuditor<SampleEvent> auditor = new CustomCommandAuditor<>(
+                repo.proxy(), SampleEvent::new, audit, null);
+        CustomCommandInvoker invoker = new CustomCommandInvoker(
+                mock(ApplicationContext.class),
+                dispatcherThatSavesEvent(repo, failure),
+                new TrackingTransactionManager(),
+                auditor,
+                repo.proxy(),
+                audit);
+
+        CommandHandler<FailingCommand, Void> handler = (queue, command) -> {
+            queue.add(new SampleDomainEvent("e"));
+            return null;
+        };
+
+        assertThrows(RuntimeException.class, () -> invoker.invoke(handler, new FailingCommand()));
+
+        String reason = seen.get().getEvents().get(0).getFailureReason();
+        assertTrue(reason.contains("No multiple selections are allowed"));
+        assertTrue(reason.contains("BookingPolicy.preventSameDayDuplicateCarBookingOn"));
+        assertTrue(reason.contains("BookingController.assignCustomerToScheduledCar"));
+        assertFalse(reason.contains("FilterChainProxy"));
+        assertFalse(reason.contains("StandardEngineValve"));
+    }
+
+    @Test
     void afterTransactionHandlerSeesCommittedSnapshot() throws Exception {
         RecordingRepo repo = new RecordingRepo();
         AuditConfiguration audit = new AuditConfiguration();

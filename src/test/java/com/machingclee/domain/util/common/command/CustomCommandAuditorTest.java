@@ -38,8 +38,8 @@ class CustomCommandAuditorTest {
         List<String> order = new ArrayList<>();
         RecordingRepo repo = new RecordingRepo();
         AuditConfiguration audit = new AuditConfiguration();
-        audit.addPreCommandAuditHandler(record -> order.add("pre"));
-        audit.addPostCommandAuditHandler(record -> order.add("post"));
+        audit.addPreCommandAuditHandler(record -> order.add("pre"), AuditTx.JOIN);
+        audit.addPostCommandAuditHandler(record -> order.add("post"), AuditTx.REQUIRES_NEW);
         CustomCommandAuditor<SampleEvent> auditor = new CustomCommandAuditor<>(
                 repo.proxy(), SampleEvent::new, audit, null);
 

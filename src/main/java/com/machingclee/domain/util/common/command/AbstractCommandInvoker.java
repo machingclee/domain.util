@@ -307,15 +307,48 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
     }
 
     /**
-     * Converts a Throwable's full stack trace to a String for storage in
-     * failure_reason.
+     * Compact stack for {@code failure_reason}: type + message and
+     * application / library frames. Servlet / security / Tomcat / JDK
+     * frames are omitted.
      */
     private static String stackTraceOf(Throwable t) {
-        if (t == null)
+        if (t == null) {
             return "";
-        java.io.StringWriter sw = new java.io.StringWriter();
-        t.printStackTrace(new java.io.PrintWriter(sw));
-        return sw.toString();
+        }
+        StringBuilder sb = new StringBuilder();
+        appendCompactTrace(sb, t, false, Collections.newSetFromMap(new IdentityHashMap<>()));
+        return sb.toString();
+    }
+
+    private static void appendCompactTrace(StringBuilder sb, Throwable t, boolean causedBy,
+            Set<Throwable> seen) {
+        if (!seen.add(t)) {
+            return;
+        }
+        if (causedBy) {
+            sb.append("Caused by: ");
+        }
+        sb.append(t).append('\n');
+        for (StackTraceElement element : t.getStackTrace()) {
+            if (isApplicationFrame(element.getClassName())) {
+                sb.append("\tat ").append(element).append('\n');
+            }
+        }
+        if (t.getCause() != null) {
+            appendCompactTrace(sb, t.getCause(), true, seen);
+        }
+    }
+
+    private static boolean isApplicationFrame(String className) {
+        return !className.startsWith("java.")
+                && !className.startsWith("jdk.")
+                && !className.startsWith("sun.")
+                && !className.startsWith("jakarta.servlet.")
+                && !className.startsWith("org.springframework.")
+                && !className.startsWith("org.apache.catalina.")
+                && !className.startsWith("org.apache.tomcat.")
+                && !className.startsWith("org.apache.coyote.")
+                && !className.startsWith("org.aspectj.");
     }
 
     /**

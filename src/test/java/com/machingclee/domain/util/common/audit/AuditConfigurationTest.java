@@ -28,9 +28,9 @@ class AuditConfigurationTest {
     void runsPreThenOriginalThenPostForCommand() throws Exception {
         List<String> order = new ArrayList<>();
         AuditConfiguration config = new AuditConfiguration();
-        config.addPreCommandAuditHandler(record -> order.add("pre"));
+        config.addPreCommandAuditHandler(record -> order.add("pre"), AuditTx.JOIN);
         config.bindOriginalCommandAuditHandler(record -> order.add("original"));
-        config.addPostCommandAuditHandler(record -> order.add("post"));
+        config.addPostCommandAuditHandler(record -> order.add("post"), AuditTx.REQUIRES_NEW);
 
         config.executeCommand(commandRecord());
 
@@ -41,9 +41,9 @@ class AuditConfigurationTest {
     void runsPreThenOriginalThenPostForEvent() throws Exception {
         List<String> order = new ArrayList<>();
         AuditConfiguration config = new AuditConfiguration();
-        config.addPreEventAuditHandler(record -> order.add("pre"));
+        config.addPreEventAuditHandler(record -> order.add("pre"), AuditTx.JOIN);
         config.bindOriginalEventAuditHandler(record -> order.add("original"));
-        config.addPostEventAuditHandler(record -> order.add("post"));
+        config.addPostEventAuditHandler(record -> order.add("post"), AuditTx.REQUIRES_NEW);
 
         config.executeEvent(eventRecord());
 

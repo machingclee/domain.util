@@ -1,6 +1,7 @@
 package com.machingclee.domain.util.common.event;
 
 import com.machingclee.domain.util.common.audit.AuditConfiguration;
+import com.machingclee.domain.util.common.audit.AuditTx;
 import com.machingclee.domain.util.common.event.enums.DispatchTiming;
 import com.machingclee.domain.util.common.interfaces.AuditEvent;
 import com.machingclee.domain.util.common.interfaces.AuditEventRepository;
@@ -23,8 +24,8 @@ class DomainEventLoggerTest {
         RecordingRepo repo = new RecordingRepo();
         List<String> order = new ArrayList<>();
         AuditConfiguration audit = new AuditConfiguration();
-        audit.addPreEventAuditHandler(record -> order.add("pre"));
-        audit.addPostEventAuditHandler(record -> order.add("post"));
+        audit.addPreEventAuditHandler(record -> order.add("pre"), AuditTx.JOIN);
+        audit.addPostEventAuditHandler(record -> order.add("post"), AuditTx.REQUIRES_NEW);
         DomainEventLogger logger = new DomainEventLogger(
                 repo.proxy(), SampleEvent::new, event -> {
                 }, audit, null);

@@ -2,24 +2,29 @@
 name: deploy-latest-version
 description: >-
   Bump the Maven version in pom.xml (major, minor, or patch — user chooses),
-  commit, tag, push, then locally `mvn -B clean deploy -DskipTests
+  commit, tag, push, locally `mvn -B clean deploy -DskipTests
   -Dgpg.passphrase=...` to Maven Central (do NOT pass
-  -Dcentral.autoPublish=true). Use when the user asks to deploy, release,
-  publish a new version, bump version, or run deploy-latest-version.
+  -Dcentral.autoPublish=true), then publish the validated Central draft via
+  the Publisher API using the Portal user token in ~/.m2/settings.xml.
+  Use when the user asks to deploy, release, publish a new version, bump
+  version, or run deploy-latest-version.
 ---
 
 # Deploy latest version
 
 Project skill for **this** repo (`domain-util`). Bumps `<version>` in root
-`pom.xml`, commits, tags, pushes the `v*` tag, then deploys **locally** to
-the Sonatype Central Publisher Portal.
+`pom.xml`, commits, tags, pushes the `v*` tag, deploys **locally** to the
+Sonatype Central Publisher Portal as a **draft**, then **publishes that
+draft via the Portal API** using the `central` user token in
+`~/.m2/settings.xml`.
 
 This project no longer publishes to GitHub Packages. Destination is Maven
 Central (`com.machingclee:domain-util`).
 
 CI (`.github/workflows/publish.yml`) may still run on `v*` tags, but the
-**canonical deploy in this skill is the local `mvn deploy`**. Do not treat a
-green (or failed) Actions run as a substitute for the local deploy.
+**canonical deploy in this skill is the local `mvn deploy` plus the Portal
+API publish**. Do not treat a green (or failed) Actions run as a substitute
+for the local deploy + API publish.
 
 ## When to use
 
@@ -151,41 +156,102 @@ Notes:
 - Staged changes should include both `pom.xml` and `README.md` when the README
   version was updated.
 
-## Step 6 — Local Maven Central deploy
+## Step 6 — Local Maven Central deploy (draft)
 
-After the tag is pushed, publish from this machine. `pom.xml` defaults
-`<central.autoPublish>` to `false` — **leave it that way**.
+After the tag is pushed, upload from this machine. `pom.xml` defaults
+`<central.autoPublish>` to `false` — **leave it that way**. The API publish
+in Step 7 is what makes the draft live, not Maven auto-publish.
 
 ### Command
 
+Capture Maven output so Step 7 can read `deploymentId`:
+
 ```bash
 export GPG_TTY=$(tty)
-mvn -B clean deploy -DskipTests -Dgpg.passphrase='OUR_GPG_PASSPHRASE'
+mvn -B clean deploy -DskipTests -Dgpg.passphrase='OUR_GPG_PASSPHRASE' | tee /tmp/domain-util-mvn-deploy.log
 ```
 
 Rules:
 
 - **Do not** pass `-Dcentral.autoPublish=true` (or any other override that
   flips `central.autoPublish`). The POM default (`false`) must stand so the
-  bundle is uploaded as a Portal draft. The user reviews and clicks
-  **Publish** at https://central.sonatype.com
+  bundle is uploaded as a Portal **USER_MANAGED** draft. Publishing is Step 7.
 - **Do not** write the GPG passphrase into the repo, the skill, `pom.xml`,
   or `settings.xml`. Pass it only as `-Dgpg.passphrase=...` (or ask the user
   to run the command if they do not want it in the agent transcript).
 - If the passphrase is not already known in this conversation, **ask**
   before deploying. Do not invent one.
-- `~/.m2/settings.xml` must have server id `central` (Portal user token).
-  GPG key id is `gpg.keyname` in `pom.xml` (`0F69925B825FA48F`).
-- Wait for `BUILD SUCCESS`. A successful run stages/uploads the bundle but
-  does **not** make the version live on repo1 until the user publishes in
-  the Portal.
+- `~/.m2/settings.xml` must have server id `central` (Portal **user token**
+  username + password — not the Central login password). GPG key id is
+  `gpg.keyname` in `pom.xml` (`0F69925B825FA48F`).
+- Wait for `BUILD SUCCESS`. A successful run stages/uploads the bundle and
+  prints a `deploymentId`. Example line:
+  `Uploaded bundle successfully, deployment name: Deployment, deploymentId: 445e208a-f4cd-4045-a74a-891681b4c867. Deployment will require manual publishing`
+- The next Maven line is typically
+  `Deployment … has been validated. To finish publishing visit https://central.sonatype.com/publishing/deployments`
+  — that visit is **optional**; Step 7 publishes it.
 
 If `mvn deploy` fails (GPG pinentry, missing token, validation), stop and
 show the error. Do not retry with `-Dcentral.autoPublish=true`.
 
-## Step 7 — Report
+## Step 7 — Publish the draft via Central Publisher API
 
-After successful git pushes **and** `mvn deploy`:
+After `BUILD SUCCESS`, publish the validated draft. Do **not** ask the user
+to click Publish in the Portal unless the API call fails.
+
+Auth: Portal user token from `~/.m2/settings.xml` server id `central`
+(`<username>` + `<password>`). Base64 of `username:password` goes in
+`Authorization: Bearer …`. **Never** print the password, write it into this
+skill, or commit it.
+
+Preferred path — run the helper next to this skill (it reads settings.xml,
+does not echo secrets):
+
+```bash
+python3 .claude/skills/deploy-latest-version/scripts/publish-central-draft.py \
+  --from-maven-log /tmp/domain-util-mvn-deploy.log \
+  --version NEW
+```
+
+If the log is gone, pass the id from the Maven line `deploymentId: <uuid>`:
+
+```bash
+python3 .claude/skills/deploy-latest-version/scripts/publish-central-draft.py \
+  --deployment-id DEPLOYMENT_ID \
+  --version NEW
+```
+
+The script:
+
+1. `POST https://central.sonatype.com/api/v1/publisher/status?id={id}` until
+   `deploymentState` is `VALIDATED` (Maven already waited for this).
+2. `POST https://central.sonatype.com/api/v1/publisher/deployment/{id}`
+   (HTTP 204). Skip this POST if state is already `PUBLISHING` / `PUBLISHED`.
+3. Poll status until `PUBLISHED` (timeout 5 minutes). Stop on `FAILED`.
+4. `GET https://repo1.maven.org/maven2/com/machingclee/domain-util/NEW/domain-util-NEW.pom`
+   — HTTP 200 means the version is on Central. `search.maven.org` often lags;
+   do not treat a search miss as failure if repo1 returned 200.
+
+Equivalent curl (only if the helper cannot run). Do **not** paste the decoded
+token into chat:
+
+```bash
+# token = base64(settings.xml central username:password) — construct in-process
+curl --request POST --fail --show-error \
+  --header "Authorization: Bearer ${BEARER_TOKEN}" \
+  "https://central.sonatype.com/api/v1/publisher/deployment/${DEPLOYMENT_ID}"
+```
+
+Docs: https://central.sonatype.org/publish/publish-portal-api/
+
+If publish HTTP is not 204/200, or status becomes `FAILED`, stop and show the
+API body. Do **not** retry with `-Dcentral.autoPublish=true`. Surface Central
+warnings (e.g. monthly release-count limit) in the report; they are not
+failures if state is `PUBLISHED`.
+
+## Step 8 — Report
+
+After successful git pushes, `mvn deploy`, **and** API `PUBLISHED`:
 
 1. Old version → new version
 2. That `pom.xml` and the README domain-util `<version>` were updated
@@ -193,10 +259,11 @@ After successful git pushes **and** `mvn deploy`:
 4. Tag name
 5. That local `mvn -B clean deploy -DskipTests -Dgpg.passphrase=…` ran
    **without** `-Dcentral.autoPublish=true`
-6. That the user should open the [Central Publisher Portal](https://central.sonatype.com)
-   and **Publish** the draft deployment (it will not appear on Maven Central
-   until they do)
-7. Optional: Actions URL (informational only — not the publish path)  
+6. Portal `deploymentId` and that Step 7 published it (`VALIDATED` →
+   `PUBLISHED`) using the `central` token in `~/.m2/settings.xml`
+7. repo1 POM URL:
+   `https://repo1.maven.org/maven2/com/machingclee/domain-util/NEW/domain-util-NEW.pom`
+8. Optional: Actions URL (informational only — not the publish path)  
    `https://github.com/machingclee/domain.util/actions`
 
 ## Failure handling
@@ -210,6 +277,10 @@ After successful git pushes **and** `mvn deploy`:
 | `pom.xml` version not found / multiple candidates | Stop; show the ambiguous lines |
 | README domain-util version not found / ambiguous | Stop; show the relevant README lines |
 | `mvn deploy` / GPG / Central upload fails | Stop; show the Maven error; do **not** retry with `-Dcentral.autoPublish=true` |
+| No `deploymentId` in Maven log | Stop; show the deploy tail; do not guess an id |
+| Missing `central` server in `~/.m2/settings.xml` | Stop; do not invent a token |
+| API publish not 204 / status `FAILED` | Stop; show the API body; do **not** retry with `-Dcentral.autoPublish=true` |
+| `PUBLISHED` but repo1 POM 404 | Report published-but-propagating; poll a few minutes; do not treat search.maven.org lag as failure |
 
 ## Example (full)
 
@@ -229,10 +300,11 @@ git tag "v0.1.3"
 git push origin main
 git push origin "v0.1.3"
 export GPG_TTY=$(tty)
-mvn -B clean deploy -DskipTests -Dgpg.passphrase='OUR_GPG_PASSPHRASE'
+mvn -B clean deploy -DskipTests -Dgpg.passphrase='OUR_GPG_PASSPHRASE' | tee /tmp/domain-util-mvn-deploy.log
+python3 .claude/skills/deploy-latest-version/scripts/publish-central-draft.py \
+  --from-maven-log /tmp/domain-util-mvn-deploy.log \
+  --version 0.1.3
 ```
-
-Then tell the user to Publish the draft in the Central Portal.
 
 ## Out of scope
 
@@ -242,3 +314,5 @@ Then tell the user to Publish the draft in the Central Portal.
 - Auto-choosing major vs minor vs patch without asking
 - Passing `-Dcentral.autoPublish=true`
 - Publishing to GitHub Packages
+- Writing Portal tokens, GPG passphrases, or `settings.xml` secrets into the
+  skill or the git repo

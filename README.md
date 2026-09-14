@@ -63,20 +63,71 @@ public interface BlogcommentEventRepository extends AuditEventRepository<Blogcom
 
 With exactly one `AuditEventRepository` bean, the library creates `CommandInvoker` for you. Inject that — do not subclass the auditor, invoker, or event logger.
 
-## 3. Customize command / event audit writes
+## 3. Customize audit writes (`AuditConfiguration`)
 
-The library also creates empty `CommandAuditConfiguration` and `EventAuditConfiguration` beans. Override either by declaring a `@Configuration` subclass. Auto-config skips its default when yours is present (`@ConditionalOnMissingBean`).
+The library creates one empty `AuditConfiguration` bean. Override it with a `@Bean` or a `@Configuration` subclass. Auto-config skips its default when yours is present (`@ConditionalOnMissingBean`).
 
-Handlers wrap `eventRepository.save` — they are **not** `CommandHandler`. They receive a record envelope, not the command/event itself:
+That one class is the whole consumer API: command-row handlers, domain-event-row handlers, and a callback that sees **every** audit row for the request after the command invoker has finished (including `failure_reason` on a failed chain).
 
-| Record | Fields |
-| --- | --- |
-| `CommandAuditRecord` | `getCommand()`, `getRequestId()`, `getAuditEvent()` |
-| `EventAuditRecord` | `getDomainEvent()`, `getRequestId()`, `getAuditEvent()`, `getWrapper()` |
+```java
+import com.machingclee.domain.util.common.audit.AfterTransactionRecord;
+import com.machingclee.domain.util.common.audit.AuditConfiguration;
+import com.machingclee.domain.util.common.audit.AuditTx;
+import com.machingclee.domain.util.common.interfaces.AuditEvent;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class CustomAuditConfiguration extends AuditConfiguration {
+
+    public CustomAuditConfiguration() {
+        // --- per command-audit row (written before the business TX) ---
+        addPreCommandAuditHandler(record -> {
+            // JOIN (default): mutate the row atomically with save
+            record.getAuditEvent().setPayload(/* redacted */);
+        });
+        addPostCommandAuditHandler(record -> {
+            // REQUIRES_NEW (default): extra sink; throw does not undo the row
+        });
+        addPostCommandAuditHandler(record -> {
+            // JOIN: still in persist TX — throw rolls back the command audit row
+        }, AuditTx.JOIN);
+
+        // --- per domain-event audit row ---
+        addPreEventAuditHandler(record -> {
+            Object domainEvent = record.getDomainEvent();
+        });
+        addPostEventAuditHandler(record -> { /* metrics / extra sink */ });
+
+        // --- once per top-level invoke, after TX + failure stamps ---
+        addAfterTransactionHandler(this::onRequestFinished);
+    }
+
+    private void onRequestFinished(AfterTransactionRecord record) {
+        String requestId = record.getRequestId();
+        boolean committed = record.isCommitted();
+        // findAllByRequestId: command rows + domain-event rows
+        for (AuditEvent row : record.getEvents()) {
+            Boolean success = row.getSuccess();
+            String type = row.getEventType();
+            String failure = row.getFailureReason(); // set on a failed chain
+        }
+    }
+}
+```
+
+Handlers wrap `eventRepository.save`. They are **not** `CommandHandler`. They receive a record envelope:
+
+| Record | When | Fields |
+| --- | --- | --- |
+| `CommandAuditRecord` | Each command audit insert | `getCommand()`, `getRequestId()`, `getAuditEvent()` |
+| `EventAuditRecord` | Each domain-event audit insert | `getDomainEvent()`, `getRequestId()`, `getAuditEvent()`, `getWrapper()` |
+| `AfterTransactionRecord` | Once, after the top-level invoke | `getRequestId()`, `isCommitted()`, `getEvents()` |
 
 `getAuditEvent()` is the row about to be saved. Mutate that instance; do not replace it.
 
-Pipeline (same thread, **not** a new thread):
+### Row pipeline (pre / post)
+
+Same thread, **not** a new thread:
 
 ```
 REQUIRES_NEW pres
@@ -84,80 +135,49 @@ REQUIRES_NEW pres
   → REQUIRES_NEW posts
 ```
 
-`AuditTx`:
-
-| Mode | Meaning |
+| `AuditTx` | Meaning |
 | --- | --- |
-| `JOIN` (pre default) | Same TX as `eventRepository.save`. A throw rolls back the audit row. |
+| `JOIN` (pre default) | Same TX as `eventRepository.save`. A throw rolls back that audit row. |
 | `REQUIRES_NEW` (post default) | Own TX. A throw is logged and swallowed. |
 
 Audit failures never abort `CommandHandler`. A `JOIN` throw only rolls back the audit insert; invoke continues.
 
-### Wrap save (pre / post)
+### After-transaction snapshot (`addAfterTransactionHandler`)
 
-```java
-@Configuration
-public class CustomCommandAuditConfiguration extends CommandAuditConfiguration {
+This is **not** Spring `TransactionSynchronization.afterCompletion`. That callback would run *before* the invoker stamps `failure_reason`.
 
-    public CustomCommandAuditConfiguration() {
-        addPreAuditHandler(record -> {
-            // JOIN: mutate the row atomically with save
-            record.getAuditEvent().setPayload(/* redacted */);
-        });
+The command invoker runs this handler once per **top-level** `invoke`, in `finally`, **after**:
 
-        addPostAuditHandler(record -> {
-            // REQUIRES_NEW: extra sink; failure does not undo the row
-        });
+1. the command transaction commits or rolls back
+2. POST_COMMIT domain-event rows exist (success path)
+3. `logFailure` on the command row and `markEventsFailed` on the domain-event rows (failure path)
 
-        addPostAuditHandler(record -> {
-            // JOIN: after save, still in persist TX — throw rolls back the row
-        }, AuditTx.JOIN);
-    }
-}
-```
+So `record.getEvents()` is `findAllByRequestId` for that request: the command row, nested commands that reused the same request id, immediate events, and (on commit) POST_COMMIT events. On a failed chain those rows already have `success=false` and `failure_reason`.
 
-```java
-@Configuration
-public class CustomEventAuditConfiguration extends EventAuditConfiguration {
+Nested `invoker.invoke` (policies) does **not** fire the handler again — the top-level invoke owns the snapshot.
 
-    public CustomEventAuditConfiguration() {
-        addPreAuditHandler(record -> {
-            Object domainEvent = record.getDomainEvent();
-        });
-        addPostAuditHandler(record -> { /* metrics / extra sink */ });
-    }
-}
-```
+A throw from the handler is logged and swallowed; it does not change the command result.
 
 ### Replace save (override)
 
-`overrideAuditHandler` **replaces** original. Call `getOriginalAuditHandler()` to still persist. Skip that call to skip DB.
+`overrideCommandAuditHandler` / `overrideEventAuditHandler` **replace** the repository save. Call `getOriginalCommandAuditHandler()` / `getOriginalEventAuditHandler()` to still persist. Skip that call to skip DB.
 
 ```java
 @Configuration
-public class CustomCommandAuditConfiguration extends CommandAuditConfiguration {
+public class CustomAuditConfiguration extends AuditConfiguration {
 
-    public CustomCommandAuditConfiguration() {
-        overrideAuditHandler(record -> {
-            getOriginalAuditHandler().handle(record); // identity = default save
+    public CustomAuditConfiguration() {
+        overrideCommandAuditHandler(record -> {
+            getOriginalCommandAuditHandler().handle(record); // identity = default save
         });
-    }
-}
-```
-
-```java
-@Configuration
-public class CustomEventAuditConfiguration extends EventAuditConfiguration {
-
-    public CustomEventAuditConfiguration() {
-        overrideAuditHandler(record -> {
+        overrideEventAuditHandler(record -> {
             // skip repository.save — original is not invoked
         });
     }
 }
 ```
 
-`getOriginalAuditHandler()` is only `eventRepository.save(record.getAuditEvent())`. It does not re-run pre/post.
+Those original handlers are only `eventRepository.save(record.getAuditEvent())`. They do not re-run pre/post.
 
 ## 4. Use it in a controller
 

@@ -1,7 +1,6 @@
 package com.machingclee.domain.util.autoconfigure;
 
-import com.machingclee.domain.util.common.audit.CommandAuditConfiguration;
-import com.machingclee.domain.util.common.audit.EventAuditConfiguration;
+import com.machingclee.domain.util.common.audit.AuditConfiguration;
 import com.machingclee.domain.util.common.command.AbstractCommandInvoker;
 import com.machingclee.domain.util.common.command.CustomCommandAuditor;
 import com.machingclee.domain.util.common.command.CustomCommandInvoker;
@@ -50,14 +49,8 @@ public class DomainUtilAuditAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    public CommandAuditConfiguration commandAuditConfiguration() {
-        return new CommandAuditConfiguration();
-    }
-
-    @Bean
-    @ConditionalOnMissingBean
-    public EventAuditConfiguration eventAuditConfiguration() {
-        return new EventAuditConfiguration();
+    public AuditConfiguration auditConfiguration() {
+        return new AuditConfiguration();
     }
 
     @Bean
@@ -65,15 +58,13 @@ public class DomainUtilAuditAutoConfiguration {
     @SuppressWarnings({"rawtypes", "unchecked"})
     public CommandAuditorPort<?> commandAuditorPort(
             AuditEventRepository<?> eventRepository,
-            CommandAuditConfiguration commandAuditConfiguration,
-            EventAuditConfiguration eventAuditConfiguration,
+            AuditConfiguration auditConfiguration,
             PlatformTransactionManager transactionManager
     ) {
         return new CustomCommandAuditor(
                 eventRepository,
                 eventFactory(eventRepository),
-                commandAuditConfiguration,
-                eventAuditConfiguration,
+                auditConfiguration,
                 transactionManager
         );
     }
@@ -85,14 +76,16 @@ public class DomainUtilAuditAutoConfiguration {
             DomainEventDispatcher domainEventDispatcher,
             PlatformTransactionManager transactionManager,
             CommandAuditorPort<?> auditor,
-            AuditEventRepository<?> eventRepository
+            AuditEventRepository<?> eventRepository,
+            AuditConfiguration auditConfiguration
     ) {
         return new CustomCommandInvoker(
                 context,
                 domainEventDispatcher,
                 transactionManager,
                 auditor,
-                eventRepository
+                eventRepository,
+                auditConfiguration
         );
     }
 
@@ -101,14 +94,14 @@ public class DomainUtilAuditAutoConfiguration {
     public DomainEventLogger domainEventLogger(
             AuditEventRepository<?> eventRepository,
             ApplicationEventPublisher publisher,
-            EventAuditConfiguration eventAuditConfiguration,
+            AuditConfiguration auditConfiguration,
             PlatformTransactionManager transactionManager
     ) {
         return new DomainEventLogger(
                 eventRepository,
                 eventFactory(eventRepository),
                 publisher,
-                eventAuditConfiguration,
+                auditConfiguration,
                 transactionManager
         );
     }

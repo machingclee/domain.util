@@ -1,7 +1,6 @@
 package com.machingclee.domain.util.autoconfigure;
 
-import com.machingclee.domain.util.common.audit.CommandAuditConfiguration;
-import com.machingclee.domain.util.common.audit.EventAuditConfiguration;
+import com.machingclee.domain.util.common.audit.AuditConfiguration;
 import com.machingclee.domain.util.common.command.AbstractCommandInvoker;
 import com.machingclee.domain.util.common.command.CustomCommandInvoker;
 import com.machingclee.domain.util.common.event.DomainEventLogger;
@@ -60,21 +59,20 @@ class DomainUtilAuditAutoConfigurationTest {
                     assertThat(context).hasSingleBean(CommandInvoker.class);
                     assertThat(context).hasSingleBean(AbstractCommandInvoker.class);
                     assertThat(context).hasSingleBean(DomainEventLogger.class);
-                    assertThat(context).hasSingleBean(CommandAuditConfiguration.class);
-                    assertThat(context).hasSingleBean(EventAuditConfiguration.class);
+                    assertThat(context).hasSingleBean(AuditConfiguration.class);
                 });
     }
 
     @Test
-    void usesUserCommandAuditConfigurationBean() {
+    void usesUserAuditConfigurationBean() {
         runner.withUserConfiguration(
                         TransactionManagerConfig.class,
                         SingleRepoConfig.class,
-                        UserCommandAuditConfig.class)
+                        UserAuditConfig.class)
                 .run(context -> {
-                    assertThat(context).hasSingleBean(CommandAuditConfiguration.class);
-                    assertThat(context.getBean(CommandAuditConfiguration.class))
-                            .isSameAs(UserCommandAuditConfig.MARKER);
+                    assertThat(context).hasSingleBean(AuditConfiguration.class);
+                    assertThat(context.getBean(AuditConfiguration.class))
+                            .isSameAs(UserAuditConfig.MARKER);
                 });
     }
 
@@ -152,11 +150,11 @@ class DomainUtilAuditAutoConfigurationTest {
     }
 
     @Configuration(proxyBeanMethods = false)
-    static class UserCommandAuditConfig {
-        static final CommandAuditConfiguration MARKER = new CommandAuditConfiguration();
+    static class UserAuditConfig {
+        static final AuditConfiguration MARKER = new AuditConfiguration();
 
         @Bean
-        CommandAuditConfiguration commandAuditConfiguration() {
+        AuditConfiguration auditConfiguration() {
             return MARKER;
         }
     }
@@ -201,6 +199,21 @@ class DomainUtilAuditAutoConfigurationTest {
         @Override
         public Boolean getSuccess() {
             return true;
+        }
+
+        @Override
+        public String getRequestId() {
+            return null;
+        }
+
+        @Override
+        public String getEventType() {
+            return null;
+        }
+
+        @Override
+        public String getFailureReason() {
+            return null;
         }
 
         @Override

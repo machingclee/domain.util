@@ -1,5 +1,6 @@
 package com.machingclee.domain.util.common.command;
 
+import com.machingclee.domain.util.common.audit.AuditConfiguration;
 import com.machingclee.domain.util.common.interfaces.AuditEvent;
 import com.machingclee.domain.util.common.interfaces.AuditEventRepository;
 import com.machingclee.domain.util.common.interfaces.CommandAuditorPort;
@@ -25,15 +26,15 @@ import org.springframework.transaction.PlatformTransactionManager;
  *         DomainEventDispatcher dispatcher,
  *         PlatformTransactionManager tm,
  *         CommandAuditorPort<? extends AuditEvent> auditor,
- *         AuditEventRepository<? extends AuditEvent> repo) {
- *     return new CustomCommandInvoker(context, dispatcher, tm, auditor, repo);
+ *         AuditEventRepository<? extends AuditEvent> repo,
+ *         AuditConfiguration audit) {
+ *     return new CustomCommandInvoker(context, dispatcher, tm, auditor, repo, audit);
  * }
  * }
  * </pre>
  */
 public class CustomCommandInvoker extends AbstractCommandInvoker<AuditEvent> {
 
-    @SuppressWarnings("unchecked")
     public CustomCommandInvoker(
             ApplicationContext context,
             DomainEventDispatcher domainEventDispatcher,
@@ -41,8 +42,21 @@ public class CustomCommandInvoker extends AbstractCommandInvoker<AuditEvent> {
             CommandAuditorPort<? extends AuditEvent> auditor,
             AuditEventRepository<? extends AuditEvent> eventRepository
     ) {
+        this(context, domainEventDispatcher, transactionManager, auditor, eventRepository, null);
+    }
+
+    @SuppressWarnings("unchecked")
+    public CustomCommandInvoker(
+            ApplicationContext context,
+            DomainEventDispatcher domainEventDispatcher,
+            PlatformTransactionManager transactionManager,
+            CommandAuditorPort<? extends AuditEvent> auditor,
+            AuditEventRepository<? extends AuditEvent> eventRepository,
+            AuditConfiguration auditConfiguration
+    ) {
         super(context, domainEventDispatcher, transactionManager,
                 (CommandAuditorPort<AuditEvent>) auditor,
-                (AuditEventRepository<AuditEvent>) eventRepository);
+                (AuditEventRepository<AuditEvent>) eventRepository,
+                auditConfiguration);
     }
 }

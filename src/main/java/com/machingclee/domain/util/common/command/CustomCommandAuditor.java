@@ -2,9 +2,8 @@ package com.machingclee.domain.util.common.command;
 
 import com.machingclee.domain.util.common.MdcContextKeys;
 import com.machingclee.domain.util.common.RequestSequence;
-import com.machingclee.domain.util.common.audit.CommandAuditConfiguration;
+import com.machingclee.domain.util.common.audit.AuditConfiguration;
 import com.machingclee.domain.util.common.audit.CommandAuditRecord;
-import com.machingclee.domain.util.common.audit.EventAuditConfiguration;
 import com.machingclee.domain.util.common.audit.EventAuditRecord;
 import com.machingclee.domain.util.common.interfaces.AuditEvent;
 import com.machingclee.domain.util.common.interfaces.AuditEventRepository;
@@ -32,27 +31,23 @@ public class CustomCommandAuditor<E extends AuditEvent> implements CommandAudito
 
     private final AuditEventRepository<E> eventRepository;
     private final Supplier<E> eventFactory;
-    private final CommandAuditConfiguration commandAudit;
-    private final EventAuditConfiguration eventAudit;
+    private final AuditConfiguration audit;
 
     private final ObjectMapper objectMapper = new ObjectMapper()
             .configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
 
     public CustomCommandAuditor(AuditEventRepository<E> eventRepository, Supplier<E> eventFactory) {
-        this(eventRepository, eventFactory, new CommandAuditConfiguration(), new EventAuditConfiguration(), null);
+        this(eventRepository, eventFactory, new AuditConfiguration(), null);
     }
 
     public CustomCommandAuditor(AuditEventRepository<E> eventRepository, Supplier<E> eventFactory,
-            CommandAuditConfiguration commandAudit, EventAuditConfiguration eventAudit,
-            PlatformTransactionManager transactionManager) {
+            AuditConfiguration audit, PlatformTransactionManager transactionManager) {
         this.eventRepository = eventRepository;
         this.eventFactory = eventFactory;
-        this.commandAudit = commandAudit;
-        this.eventAudit = eventAudit;
-        commandAudit.bindOriginalAuditHandler(record -> saveAuditEvent(record.getAuditEvent()));
-        eventAudit.bindOriginalAuditHandler(record -> saveAuditEvent(record.getAuditEvent()));
-        commandAudit.bindTransactionManager(transactionManager);
-        eventAudit.bindTransactionManager(transactionManager);
+        this.audit = audit;
+        audit.bindOriginalCommandAuditHandler(record -> saveAuditEvent(record.getAuditEvent()));
+        audit.bindOriginalEventAuditHandler(record -> saveAuditEvent(record.getAuditEvent()));
+        audit.bindTransactionManager(transactionManager);
     }
 
     @Override
@@ -72,7 +67,7 @@ public class CustomCommandAuditor<E extends AuditEvent> implements CommandAudito
             event.setRequestUserEmail(userId);
             event.setSuccess(false);
 
-            commandAudit.execute(new CommandAuditRecord(command, requestId, event));
+            audit.executeCommand(new CommandAuditRecord(command, requestId, event));
             logger.info("AUDIT: Command logged in transaction with createdAt = {}", uniqueTimestamp);
             return event;
         } catch (Exception e) {
@@ -99,7 +94,7 @@ public class CustomCommandAuditor<E extends AuditEvent> implements CommandAudito
             event.setRequestUserEmail(userId);
             event.setSuccess(true);
 
-            eventAudit.execute(new EventAuditRecord(domainEvent, requestId, event));
+            audit.executeEvent(new EventAuditRecord(domainEvent, requestId, event));
             logger.info("AUDIT: Event [{}] logged for requestId={}", eventType, requestId);
             return event;
         } catch (Exception e) {

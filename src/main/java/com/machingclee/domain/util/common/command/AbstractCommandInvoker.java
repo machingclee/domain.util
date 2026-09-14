@@ -4,6 +4,7 @@ import com.machingclee.domain.util.annotation.Actor;
 import com.machingclee.domain.util.annotation.BoundedContext;
 import com.machingclee.domain.util.common.MdcContextKeys;
 import com.machingclee.domain.util.common.RequestSequence;
+import com.machingclee.domain.util.common.audit.AuditConfiguration;
 import com.machingclee.domain.util.common.bytecodescanner.ControllerCommandScanner;
 import com.machingclee.domain.util.common.bytecodescanner.EntityTypeScanner;
 import com.machingclee.domain.util.common.bytecodescanner.EventTypeScanner;
@@ -62,6 +63,7 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
 
     private final CommandAuditorPort<E> auditor;
     private final AuditEventRepository<E> eventRepository;
+    private final AuditConfiguration auditConfiguration;
 
     // -------------------------------------------------------------------------
     // Constructor
@@ -73,6 +75,16 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
             PlatformTransactionManager transactionManager,
             CommandAuditorPort<E> auditor,
             AuditEventRepository<E> eventRepository) {
+        this(context, domainEventDispatcher, transactionManager, auditor, eventRepository, null);
+    }
+
+    protected AbstractCommandInvoker(
+            ApplicationContext context,
+            DomainEventDispatcher domainEventDispatcher,
+            PlatformTransactionManager transactionManager,
+            CommandAuditorPort<E> auditor,
+            AuditEventRepository<E> eventRepository,
+            AuditConfiguration auditConfiguration) {
         this.domainEventDispatcher = domainEventDispatcher;
         this.context = context;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
@@ -80,6 +92,7 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
         this.requiresNewTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.auditor = auditor;
         this.eventRepository = eventRepository;
+        this.auditConfiguration = auditConfiguration;
     }
 
     // -------------------------------------------------------------------------
@@ -149,6 +162,7 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
         // regardless of what happens in the main transaction.
         E commandEvent = auditor.logCommandInTransaction(command, requestId);
 
+        boolean committed = false;
         try {
             R result;
 
@@ -239,6 +253,7 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
                 result = resultHolder[0];
             }
 
+            committed = true;
             logger.info("Command completed successfully: {}", command.getClass().getSimpleName());
             return result;
         } catch (RuntimeException e) {
@@ -252,10 +267,24 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
             throw e;
         } finally {
             if (!isNestedCommand) {
+                runAfterTransaction(requestId, committed);
                 RequestSequence.clear();
                 MDC.clear();
             }
         }
+    }
+
+    /**
+     * After the command TX and {@link #stampCommandFailure} /
+     * {@link #markEventsFailed}, so {@code getEvents()} includes
+     * {@code failure_reason}. Nested invokes skip this — the top-level
+     * invoke owns the requestId snapshot.
+     */
+    private void runAfterTransaction(String requestId, boolean committed) {
+        if (auditConfiguration == null) {
+            return;
+        }
+        auditConfiguration.executeAfterTransaction(requestId, committed, eventRepository);
     }
 
     // -------------------------------------------------------------------------

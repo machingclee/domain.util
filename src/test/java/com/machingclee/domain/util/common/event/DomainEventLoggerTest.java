@@ -1,6 +1,6 @@
 package com.machingclee.domain.util.common.event;
 
-import com.machingclee.domain.util.common.audit.EventAuditConfiguration;
+import com.machingclee.domain.util.common.audit.AuditConfiguration;
 import com.machingclee.domain.util.common.event.enums.DispatchTiming;
 import com.machingclee.domain.util.common.interfaces.AuditEvent;
 import com.machingclee.domain.util.common.interfaces.AuditEventRepository;
@@ -22,12 +22,12 @@ class DomainEventLoggerTest {
     void immediateEventGoesThroughPipelineAndSaves() {
         RecordingRepo repo = new RecordingRepo();
         List<String> order = new ArrayList<>();
-        EventAuditConfiguration eventAudit = new EventAuditConfiguration();
-        eventAudit.addPreAuditHandler(record -> order.add("pre"));
-        eventAudit.addPostAuditHandler(record -> order.add("post"));
+        AuditConfiguration audit = new AuditConfiguration();
+        audit.addPreEventAuditHandler(record -> order.add("pre"));
+        audit.addPostEventAuditHandler(record -> order.add("post"));
         DomainEventLogger logger = new DomainEventLogger(
                 repo.proxy(), SampleEvent::new, event -> {
-                }, eventAudit, null);
+                }, audit, null);
 
         logger.recordSynchronousEvent(new EventWrapper<>(new SampleDomainEvent("e"), DispatchTiming.IMMEDIATE));
 
@@ -41,11 +41,11 @@ class DomainEventLoggerTest {
     void overrideCanSkipSave() {
         RecordingRepo repo = new RecordingRepo();
         AtomicBoolean overrideRan = new AtomicBoolean();
-        EventAuditConfiguration eventAudit = new EventAuditConfiguration();
-        eventAudit.overrideAuditHandler(record -> overrideRan.set(true));
+        AuditConfiguration audit = new AuditConfiguration();
+        audit.overrideEventAuditHandler(record -> overrideRan.set(true));
         DomainEventLogger logger = new DomainEventLogger(
                 repo.proxy(), SampleEvent::new, event -> {
-                }, eventAudit, null);
+                }, audit, null);
 
         logger.recordSynchronousEvent(new EventWrapper<>(new SampleDomainEvent("e"), DispatchTiming.IMMEDIATE));
 
@@ -97,6 +97,8 @@ class DomainEventLoggerTest {
         Integer id;
         Boolean success;
         String eventType;
+        String requestId;
+        String failureReason;
 
         @Override
         public Integer getId() {
@@ -106,6 +108,21 @@ class DomainEventLoggerTest {
         @Override
         public Boolean getSuccess() {
             return success;
+        }
+
+        @Override
+        public String getRequestId() {
+            return requestId;
+        }
+
+        @Override
+        public String getEventType() {
+            return eventType;
+        }
+
+        @Override
+        public String getFailureReason() {
+            return failureReason;
         }
 
         @Override
@@ -127,6 +144,7 @@ class DomainEventLoggerTest {
 
         @Override
         public void setRequestId(String requestId) {
+            this.requestId = requestId;
         }
 
         @Override
@@ -136,6 +154,7 @@ class DomainEventLoggerTest {
 
         @Override
         public void setFailureReason(String failureReason) {
+            this.failureReason = failureReason;
         }
 
         @Override

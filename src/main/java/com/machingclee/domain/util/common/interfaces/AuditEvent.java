@@ -9,6 +9,12 @@ public interface AuditEvent {
 
     Boolean getSuccess();
 
+    String getRequestId();
+
+    String getEventType();
+
+    String getFailureReason();
+
     void setCreatedAt(Double createdAt);
 
     void setEventType(String eventType);

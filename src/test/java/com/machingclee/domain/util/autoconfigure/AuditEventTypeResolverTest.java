@@ -76,6 +76,21 @@ class AuditEventTypeResolverTest {
         }
 
         @Override
+        public String getRequestId() {
+            return null;
+        }
+
+        @Override
+        public String getEventType() {
+            return null;
+        }
+
+        @Override
+        public String getFailureReason() {
+            return null;
+        }
+
+        @Override
         public void setCreatedAt(Double createdAt) {
         }
 

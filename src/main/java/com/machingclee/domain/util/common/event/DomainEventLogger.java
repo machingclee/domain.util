@@ -3,7 +3,7 @@ package com.machingclee.domain.util.common.event;
 import com.machingclee.domain.util.common.ExecutionContext;
 import com.machingclee.domain.util.common.MdcContextKeys;
 import com.machingclee.domain.util.common.RequestSequence;
-import com.machingclee.domain.util.common.audit.EventAuditConfiguration;
+import com.machingclee.domain.util.common.audit.AuditConfiguration;
 import com.machingclee.domain.util.common.audit.EventAuditRecord;
 import com.machingclee.domain.util.common.event.enums.DispatchTiming;
 import com.machingclee.domain.util.common.interfaces.AuditEvent;
@@ -59,27 +59,27 @@ public class DomainEventLogger {
     private final AuditEventRepository<AuditEvent> eventRepository;
     private final Supplier<AuditEvent> eventFactory;
     private final ApplicationEventPublisher applicationEventPublisher;
-    private final EventAuditConfiguration eventAudit;
+    private final AuditConfiguration audit;
 
     public DomainEventLogger(AuditEventRepository<? extends AuditEvent> eventRepository,
             Supplier<? extends AuditEvent> eventFactory,
             ApplicationEventPublisher applicationEventPublisher) {
-        this(eventRepository, eventFactory, applicationEventPublisher, new EventAuditConfiguration(), null);
+        this(eventRepository, eventFactory, applicationEventPublisher, new AuditConfiguration(), null);
     }
 
     @SuppressWarnings("unchecked")
     public DomainEventLogger(AuditEventRepository<? extends AuditEvent> eventRepository,
             Supplier<? extends AuditEvent> eventFactory,
             ApplicationEventPublisher applicationEventPublisher,
-            EventAuditConfiguration eventAudit,
+            AuditConfiguration audit,
             PlatformTransactionManager transactionManager) {
         this.eventRepository = (AuditEventRepository<AuditEvent>) eventRepository;
         this.eventFactory = (Supplier<AuditEvent>) eventFactory;
         this.applicationEventPublisher = applicationEventPublisher;
-        this.eventAudit = eventAudit;
-        eventAudit.bindOriginalAuditHandler(record ->
+        this.audit = audit;
+        audit.bindOriginalEventAuditHandler(record ->
                 this.eventRepository.save(record.getAuditEvent()));
-        eventAudit.bindTransactionManager(transactionManager);
+        audit.bindTransactionManager(transactionManager);
     }
 
     @EventListener
@@ -149,7 +149,7 @@ public class DomainEventLogger {
         eventToSave.setEventOrder(RequestSequence.next(requestId.isBlank() ? null : requestId));
         eventToSave.setSuccess(true);
 
-        eventAudit.execute(new EventAuditRecord(event, requestId, eventToSave, wrappedEvent));
+        audit.executeEvent(new EventAuditRecord(event, requestId, eventToSave, wrappedEvent));
         logger.info("AUDIT: Event [{}] saved with createdAt={}", commandAwareEventType, uniqueTimestamp);
     }
 

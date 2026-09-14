@@ -1,8 +1,7 @@
 package com.machingclee.domain.util.common.command;
 
+import com.machingclee.domain.util.common.audit.AuditConfiguration;
 import com.machingclee.domain.util.common.audit.AuditTx;
-import com.machingclee.domain.util.common.audit.CommandAuditConfiguration;
-import com.machingclee.domain.util.common.audit.EventAuditConfiguration;
 import com.machingclee.domain.util.common.interfaces.AuditEvent;
 import com.machingclee.domain.util.common.interfaces.AuditEventRepository;
 import org.junit.jupiter.api.Test;
@@ -38,11 +37,11 @@ class CustomCommandAuditorTest {
     void preAndPostRunAroundSave() throws Exception {
         List<String> order = new ArrayList<>();
         RecordingRepo repo = new RecordingRepo();
-        CommandAuditConfiguration commandAudit = new CommandAuditConfiguration();
-        commandAudit.addPreAuditHandler(record -> order.add("pre"));
-        commandAudit.addPostAuditHandler(record -> order.add("post"));
+        AuditConfiguration audit = new AuditConfiguration();
+        audit.addPreCommandAuditHandler(record -> order.add("pre"));
+        audit.addPostCommandAuditHandler(record -> order.add("post"));
         CustomCommandAuditor<SampleEvent> auditor = new CustomCommandAuditor<>(
-                repo.proxy(), SampleEvent::new, commandAudit, new EventAuditConfiguration(), null);
+                repo.proxy(), SampleEvent::new, audit, null);
 
         auditor.logCommandInTransaction(new SampleCommand("x"), "req-1");
 
@@ -54,10 +53,10 @@ class CustomCommandAuditorTest {
     void overrideCanSkipOriginalSave() throws Exception {
         RecordingRepo repo = new RecordingRepo();
         AtomicBoolean overrideRan = new AtomicBoolean();
-        CommandAuditConfiguration commandAudit = new CommandAuditConfiguration();
-        commandAudit.overrideAuditHandler(record -> overrideRan.set(true));
+        AuditConfiguration audit = new AuditConfiguration();
+        audit.overrideCommandAuditHandler(record -> overrideRan.set(true));
         CustomCommandAuditor<SampleEvent> auditor = new CustomCommandAuditor<>(
-                repo.proxy(), SampleEvent::new, commandAudit, new EventAuditConfiguration(), null);
+                repo.proxy(), SampleEvent::new, audit, null);
 
         SampleEvent event = auditor.logCommandInTransaction(new SampleCommand("x"), "req-1");
 
@@ -69,10 +68,10 @@ class CustomCommandAuditorTest {
     @Test
     void overrideCanCallOriginalSave() throws Exception {
         RecordingRepo repo = new RecordingRepo();
-        CommandAuditConfiguration commandAudit = new CommandAuditConfiguration();
-        commandAudit.overrideAuditHandler(record -> commandAudit.getOriginalAuditHandler().handle(record));
+        AuditConfiguration audit = new AuditConfiguration();
+        audit.overrideCommandAuditHandler(record -> audit.getOriginalCommandAuditHandler().handle(record));
         CustomCommandAuditor<SampleEvent> auditor = new CustomCommandAuditor<>(
-                repo.proxy(), SampleEvent::new, commandAudit, new EventAuditConfiguration(), null);
+                repo.proxy(), SampleEvent::new, audit, null);
 
         auditor.logCommandInTransaction(new SampleCommand("x"), "req-1");
 
@@ -92,12 +91,12 @@ class CustomCommandAuditorTest {
     @Test
     void joinPostFailureDoesNotPropagateFromLogCommand() {
         RecordingRepo repo = new RecordingRepo();
-        CommandAuditConfiguration commandAudit = new CommandAuditConfiguration();
-        commandAudit.addPostAuditHandler(record -> {
+        AuditConfiguration audit = new AuditConfiguration();
+        audit.addPostCommandAuditHandler(record -> {
             throw new IllegalStateException("audit post failed");
         }, AuditTx.JOIN);
         CustomCommandAuditor<SampleEvent> auditor = new CustomCommandAuditor<>(
-                repo.proxy(), SampleEvent::new, commandAudit, new EventAuditConfiguration(), null);
+                repo.proxy(), SampleEvent::new, audit, null);
 
         SampleEvent event = auditor.logCommandInTransaction(new SampleCommand("x"), "req-1");
 
@@ -159,6 +158,7 @@ class CustomCommandAuditorTest {
         String payload;
         String requestId;
         String eventType;
+        String failureReason;
 
         @Override
         public Integer getId() {
@@ -168,6 +168,21 @@ class CustomCommandAuditorTest {
         @Override
         public Boolean getSuccess() {
             return success;
+        }
+
+        @Override
+        public String getRequestId() {
+            return requestId;
+        }
+
+        @Override
+        public String getEventType() {
+            return eventType;
+        }
+
+        @Override
+        public String getFailureReason() {
+            return failureReason;
         }
 
         @Override
@@ -200,6 +215,7 @@ class CustomCommandAuditorTest {
 
         @Override
         public void setFailureReason(String failureReason) {
+            this.failureReason = failureReason;
         }
 
         @Override

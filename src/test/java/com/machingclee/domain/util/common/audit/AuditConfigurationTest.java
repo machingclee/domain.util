@@ -202,21 +202,22 @@ class AuditConfigurationTest {
     }
 
     @Test
-    void afterTransactionHandlerReceivesRequestRows() {
-        RecordingRepo repo = new RecordingRepo();
+    void afterTransactionHandlerReceivesRequestRows() throws Exception {
         StubEvent command = new StubEvent();
         command.id = 1;
         command.requestId = "req-1";
         command.eventType = "CreateCommand";
         command.success = false;
         command.failureReason = "boom";
-        repo.saved.add(command);
 
         AtomicReference<AfterTransactionRecord> seen = new AtomicReference<>();
         AuditConfiguration config = new AuditConfiguration();
+        config.bindOriginalCommandAuditHandler(record -> {
+        });
         config.addAfterTransactionHandler(seen::set);
+        config.executeCommand(new CommandAuditRecord("cmd", "req-1", command));
 
-        config.executeAfterTransaction("req-1", false, repo.proxy());
+        config.executeAfterTransaction("req-1", false, null);
 
         AfterTransactionRecord record = seen.get();
         assertEquals("req-1", record.getRequestId());
@@ -224,6 +225,97 @@ class AuditConfigurationTest {
         assertEquals(1, record.getEvents().size());
         assertEquals("boom", record.getEvents().get(0).getFailureReason());
         assertEquals("CreateCommand", record.getEvents().get(0).getEventType());
+    }
+
+    @Test
+    void afterTransactionHandlerSeesRowsWhoseSaveFailed() throws Exception {
+        RecordingRepo repo = new RecordingRepo();
+        AtomicReference<AfterTransactionRecord> seen = new AtomicReference<>();
+        AuditConfiguration config = new AuditConfiguration();
+        config.bindOriginalCommandAuditHandler(record -> {
+            throw new IllegalStateException("db down");
+        });
+        config.bindOriginalEventAuditHandler(record -> {
+            throw new IllegalStateException("db down");
+        });
+        config.addAfterTransactionHandler(seen::set);
+
+        StubEvent command = new StubEvent();
+        command.requestId = "req-1";
+        command.eventType = "CreateCommand";
+        command.success = false;
+        StubEvent event = new StubEvent();
+        event.requestId = "req-1";
+        event.eventType = "BookingCreatedEvent";
+        event.success = true;
+
+        assertThrows(IllegalStateException.class,
+                () -> config.executeCommand(new CommandAuditRecord("cmd", "req-1", command)));
+        assertThrows(IllegalStateException.class,
+                () -> config.executeEvent(new EventAuditRecord("evt", "req-1", event)));
+
+        config.executeAfterTransaction("req-1", true, repo.proxy());
+
+        AfterTransactionRecord record = seen.get();
+        assertEquals(2, record.getEvents().size());
+        assertTrue(record.getEvents().stream()
+                .allMatch(e -> e.getFailureReason() != null && e.getFailureReason().contains("db down")));
+        assertEquals(0, repo.saved.size());
+    }
+
+    @Test
+    void commandResultStampIsMirroredOntoTheRememberedRow() throws Exception {
+        StubEvent command = new StubEvent();
+        command.id = 7;
+        command.requestId = "req-1";
+        command.eventType = "CreateCommand";
+        command.success = false;
+
+        AtomicReference<AfterTransactionRecord> seen = new AtomicReference<>();
+        AuditConfiguration config = new AuditConfiguration();
+        config.bindOriginalCommandAuditHandler(record -> {
+        });
+        config.addAfterTransactionHandler(seen::set);
+        config.executeCommand(new CommandAuditRecord("cmd", "req-1", command));
+
+        config.markCommandResult("req-1", 7, false, "boom");
+        config.executeAfterTransaction("req-1", false, null);
+
+        assertEquals("boom", seen.get().getEvents().get(0).getFailureReason());
+        assertEquals(Boolean.FALSE, seen.get().getEvents().get(0).getSuccess());
+    }
+
+    @Test
+    void eventFailureStampIsMirroredOntoTheRememberedRows() throws Exception {
+        StubEvent command = new StubEvent();
+        command.id = 1;
+        command.requestId = "req-1";
+        command.success = false;
+        command.failureReason = "boom";
+        StubEvent event = new StubEvent();
+        event.id = 2;
+        event.requestId = "req-1";
+        event.eventType = "BookingCreatedEvent";
+        event.success = true;
+
+        AtomicReference<AfterTransactionRecord> seen = new AtomicReference<>();
+        AuditConfiguration config = new AuditConfiguration();
+        config.bindOriginalCommandAuditHandler(record -> {
+        });
+        config.bindOriginalEventAuditHandler(record -> {
+        });
+        config.addAfterTransactionHandler(seen::set);
+        config.executeCommand(new CommandAuditRecord("cmd", "req-1", command));
+        config.executeEvent(new EventAuditRecord("evt", "req-1", event));
+
+        config.markEventsFailed("req-1", "boom");
+        config.executeAfterTransaction("req-1", false, null);
+
+        AuditEvent stamped = seen.get().getEvents().get(1);
+        assertEquals("BookingCreatedEvent", stamped.getEventType());
+        assertEquals(Boolean.FALSE, stamped.getSuccess());
+        assertEquals("boom", stamped.getFailureReason());
+        assertEquals("boom", seen.get().getEvents().get(0).getFailureReason());
     }
 
     @Test

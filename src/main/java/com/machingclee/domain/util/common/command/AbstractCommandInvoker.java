@@ -367,6 +367,9 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
             });
             return null;
         });
+        if (auditConfiguration != null) {
+            auditConfiguration.markEventsFailed(requestId, reason);
+        }
     }
 
     // -------------------------------------------------------------------------

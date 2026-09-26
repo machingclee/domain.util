@@ -111,6 +111,7 @@ public class CustomCommandAuditor<E extends AuditEvent> implements CommandAudito
             return;
         event.setSuccess(true);
         eventRepository.save(event);
+        audit.markCommandResult(event.getRequestId(), eventId, true, event.getFailureReason());
     }
 
     @Override
@@ -122,6 +123,7 @@ public class CustomCommandAuditor<E extends AuditEvent> implements CommandAudito
         event.setSuccess(false);
         event.setFailureReason(error);
         eventRepository.save(event);
+        audit.markCommandResult(event.getRequestId(), eventId, false, error);
     }
 
     // -------------------------------------------------------------------------

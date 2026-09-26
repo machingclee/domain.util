@@ -11,6 +11,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Combined command + domain-event audit pipeline, plus a callback that
@@ -49,6 +50,15 @@ import java.util.Objects;
  * invoker runs it once for a top-level invoke, after commit (so
  * POST_COMMIT event rows exist) or after rollback + failure stamps (so
  * {@code failure_reason} is already on the rows).
+ * <p>
+ * Every command and domain-event row passed through {@link #executeCommand}
+ * or {@link #executeEvent} is kept in memory for its {@code requestId},
+ * including rows whose repository save failed. {@link #executeAfterTransaction}
+ * hands the handler that list, so a swallowed persist failure still reaches
+ * it. {@code logSuccess} / {@code logFailure} and {@code markEventsFailed}
+ * reload managed copies, so they mirror the stamp back with
+ * {@link #markCommandResult} and {@link #markEventsFailed}. The invoker
+ * drops the request's buffer once the handler has run.
  */
 public class AuditConfiguration {
 
@@ -57,6 +67,12 @@ public class AuditConfiguration {
     private final Pipeline<CommandAuditRecord> commands = new Pipeline<>("command");
     private final Pipeline<EventAuditRecord> events = new Pipeline<>("event");
     private final List<AuditHandler<AfterTransactionRecord>> afterTransactionHandlers = new ArrayList<>();
+    /**
+     * Audit rows built for a requestId, in the order they were executed.
+     * A nested invoke shares the top-level requestId, so one list holds the
+     * whole command chain. Append-only on the command thread.
+     */
+    private final ConcurrentHashMap<String, List<AuditEvent>> pendingEvents = new ConcurrentHashMap<>();
 
     private TransactionTemplate persistTemplate;
     private TransactionTemplate requiresNewTemplate;
@@ -101,7 +117,21 @@ public class AuditConfiguration {
     }
 
     public void executeCommand(CommandAuditRecord record) throws Exception {
-        commands.execute(record);
+        try {
+            commands.execute(record);
+        } finally {
+            // Remember even when the save throws — the caller swallows that
+            // and the row would otherwise never reach the after-transaction
+            // handler. Stamp the reason here too: there is no id to look up
+            // later, so logFailure cannot write it. Leave a successful row
+            // untouched — consumers default failureReason to "".
+            String persistFailure = commands.takePersistFailure();
+            if (persistFailure != null && (record.getAuditEvent().getFailureReason() == null
+                    || record.getAuditEvent().getFailureReason().isBlank())) {
+                record.getAuditEvent().setFailureReason(persistFailure);
+            }
+            remember(record.getRequestId(), record.getAuditEvent());
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -144,7 +174,16 @@ public class AuditConfiguration {
     }
 
     public void executeEvent(EventAuditRecord record) throws Exception {
-        events.execute(record);
+        try {
+            events.execute(record);
+        } finally {
+            String persistFailure = events.takePersistFailure();
+            if (persistFailure != null && (record.getAuditEvent().getFailureReason() == null
+                    || record.getAuditEvent().getFailureReason().isBlank())) {
+                record.getAuditEvent().setFailureReason(persistFailure);
+            }
+            remember(record.getRequestId(), record.getAuditEvent());
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -154,8 +193,8 @@ public class AuditConfiguration {
     /**
      * Runs once per top-level command invoke, after the command transaction
      * has completed and after {@code logFailure} / {@code markEventsFailed}
-     * on the failure path. {@link AfterTransactionRecord#getEvents()} is
-     * {@code findAllByRequestId}. Failures are logged and swallowed.
+     * on the failure path. {@link AfterTransactionRecord#getEvents()} is the
+     * in-memory rows for this request. Failures are logged and swallowed.
      */
     public AuditConfiguration addAfterTransactionHandler(AuditHandler<AfterTransactionRecord> handler) {
         afterTransactionHandlers.add(Objects.requireNonNull(handler, "after-transaction audit handler"));
@@ -171,13 +210,7 @@ public class AuditConfiguration {
         if (afterTransactionHandlers.isEmpty() || requestId == null || requestId.isBlank()) {
             return;
         }
-        List<AuditEvent> snapshot;
-        try {
-            snapshot = loadEvents(requestId, repository);
-        } catch (Exception e) {
-            logger.warn("Failed to load audit events for requestId={}: {}", requestId, e.getMessage(), e);
-            snapshot = List.of();
-        }
+        List<AuditEvent> snapshot = drainPending(requestId);
         AfterTransactionRecord record = new AfterTransactionRecord(requestId, committed, snapshot);
         for (AuditHandler<AfterTransactionRecord> handler : afterTransactionHandlers) {
             try {
@@ -205,22 +238,71 @@ public class AuditConfiguration {
         this.requiresNewTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
-    private List<AuditEvent> loadEvents(String requestId,
-            AuditEventRepository<? extends AuditEvent> repository) {
-        if (repository == null) {
-            return List.of();
+    /**
+     * Copies a domain-event failure stamp onto the in-memory rows.
+     * {@code markEventsFailed} loads fresh managed copies by requestId, so
+     * the rows remembered at {@code executeEvent} would otherwise keep
+     * {@code success=true} and an empty {@code failure_reason}. Command rows
+     * are already stamped by {@link #markCommandResult}.
+     */
+    public void markEventsFailed(String requestId, String failureReason) {
+        if (requestId == null || requestId.isBlank()) {
+            return;
         }
-        if (requiresNewTemplate != null) {
-            return requiresNewTemplate.execute(tx -> copyEvents(repository.findAllByRequestId(requestId)));
+        List<AuditEvent> pending = pendingEvents.get(requestId);
+        if (pending == null) {
+            return;
         }
-        return copyEvents(repository.findAllByRequestId(requestId));
+        for (AuditEvent event : pending) {
+            if (Boolean.FALSE.equals(event.getSuccess())) {
+                continue;
+            }
+            event.setSuccess(false);
+            event.setFailureReason(failureReason);
+        }
     }
 
-    private static List<AuditEvent> copyEvents(List<? extends AuditEvent> found) {
-        if (found == null || found.isEmpty()) {
+    /**
+     * Copies a command-row stamp onto the in-memory row. {@code logSuccess}
+     * and {@code logFailure} load a new managed instance by id, so the row
+     * remembered at {@code executeCommand} would otherwise keep
+     * {@code success=false} and an empty {@code failure_reason}.
+     */
+    public void markCommandResult(String requestId, Integer eventId, boolean success, String failureReason) {
+        if (requestId == null || requestId.isBlank() || eventId == null) {
+            return;
+        }
+        List<AuditEvent> pending = pendingEvents.get(requestId);
+        if (pending == null) {
+            return;
+        }
+        for (AuditEvent event : pending) {
+            if (eventId.equals(event.getId())) {
+                event.setSuccess(success);
+                event.setFailureReason(failureReason);
+                return;
+            }
+        }
+    }
+
+    /**
+     * Keeps the audit row that {@code executeCommand} / {@code executeEvent}
+     * just built, so a failed save is still visible to the after-transaction
+     * handler. A blank requestId cannot be correlated back, so it is dropped.
+     */
+    private void remember(String requestId, AuditEvent event) {
+        if (requestId == null || requestId.isBlank() || event == null) {
+            return;
+        }
+        pendingEvents.computeIfAbsent(requestId, id -> new ArrayList<>()).add(event);
+    }
+
+    private List<AuditEvent> drainPending(String requestId) {
+        List<AuditEvent> pending = pendingEvents.remove(requestId);
+        if (pending == null || pending.isEmpty()) {
             return List.of();
         }
-        return new ArrayList<>(found);
+        return List.copyOf(pending);
     }
 
     private <T> void runRequiresNew(AuditHandler<T> handler, T record) throws Exception {
@@ -238,6 +320,17 @@ public class AuditConfiguration {
             return;
         }
         handler.handle(record);
+    }
+
+    private static String failureText(Throwable error) {
+        if (error == null) {
+            return "audit persist failed";
+        }
+        String message = error.getMessage();
+        if (message == null || message.isBlank()) {
+            return error.getClass().getSimpleName();
+        }
+        return error.getClass().getSimpleName() + ": " + message;
     }
 
     private static Exception unwrap(AuditPersistException e) {
@@ -266,6 +359,8 @@ public class AuditConfiguration {
         private AuditHandler<T> originalDelegate = record -> {
         };
         private final AuditHandler<T> originalHandler = record -> originalDelegate.handle(record);
+        /** Set while {@link #execute} is throwing out of {@link #persist}. */
+        private String persistFailure;
 
         private Pipeline(String name) {
             this.name = name;
@@ -300,9 +395,21 @@ public class AuditConfiguration {
             try {
                 persist(record);
             } catch (AuditPersistException e) {
-                throw unwrap(e);
+                Exception cause = unwrap(e);
+                persistFailure = failureText(cause);
+                throw cause;
+            } catch (Exception e) {
+                persistFailure = failureText(e);
+                throw e;
             }
             runIsolatedPosts(record);
+        }
+
+        /** Reason from the persist that just failed, or null. Read once. */
+        private String takePersistFailure() {
+            String failure = persistFailure;
+            persistFailure = null;
+            return failure;
         }
 
         private void runIsolatedPres(T record) {

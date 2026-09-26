@@ -48,7 +48,7 @@ class AbstractCommandInvokerTest {
                 repo.proxy(), SampleEvent::new, audit, null);
         CustomCommandInvoker invoker = new CustomCommandInvoker(
                 mock(ApplicationContext.class),
-                dispatcherThatSavesEvent(repo, new IllegalStateException("boom")),
+                dispatcherThatSavesEvent(audit, new IllegalStateException("boom")),
                 new TrackingTransactionManager(),
                 auditor,
                 repo.proxy(),
@@ -94,7 +94,7 @@ class AbstractCommandInvokerTest {
                 repo.proxy(), SampleEvent::new, audit, null);
         CustomCommandInvoker invoker = new CustomCommandInvoker(
                 mock(ApplicationContext.class),
-                dispatcherThatSavesEvent(repo, failure),
+                dispatcherThatSavesEvent(audit, failure),
                 new TrackingTransactionManager(),
                 auditor,
                 repo.proxy(),
@@ -126,7 +126,7 @@ class AbstractCommandInvokerTest {
                 repo.proxy(), SampleEvent::new, audit, null);
         CustomCommandInvoker invoker = new CustomCommandInvoker(
                 mock(ApplicationContext.class),
-                dispatcherThatSavesEvent(repo),
+                dispatcherThatSavesEvent(audit),
                 new TrackingTransactionManager(),
                 auditor,
                 repo.proxy(),
@@ -156,7 +156,7 @@ class AbstractCommandInvokerTest {
                 repo.proxy(), SampleEvent::new, audit, null);
         CustomCommandInvoker invoker = new CustomCommandInvoker(
                 mock(ApplicationContext.class),
-                dispatcherThatSavesEvent(repo),
+                dispatcherThatSavesEvent(audit),
                 new TrackingTransactionManager(),
                 auditor,
                 repo.proxy(),
@@ -176,11 +176,11 @@ class AbstractCommandInvokerTest {
         assertEquals(1, afterTx.get());
     }
 
-    private static DomainEventDispatcher dispatcherThatSavesEvent(RecordingRepo repo) {
-        return dispatcherThatSavesEvent(repo, null);
+    private static DomainEventDispatcher dispatcherThatSavesEvent(AuditConfiguration audit) {
+        return dispatcherThatSavesEvent(audit, null);
     }
 
-    private static DomainEventDispatcher dispatcherThatSavesEvent(RecordingRepo repo, RuntimeException fail) {
+    private static DomainEventDispatcher dispatcherThatSavesEvent(AuditConfiguration audit, RuntimeException fail) {
         return new DomainEventDispatcher() {
             @Override
             public void dispatchNow(EventQueue eventQueue, String requestId) {
@@ -195,7 +195,12 @@ class AbstractCommandInvokerTest {
                 event.requestId = requestId;
                 event.eventType = "SampleDomainEvent";
                 event.success = true;
-                repo.save(event);
+                try {
+                    audit.executeEvent(new com.machingclee.domain.util.common.audit.EventAuditRecord(
+                            "evt", requestId, event));
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
                 if (fail != null) {
                     throw fail;
                 }

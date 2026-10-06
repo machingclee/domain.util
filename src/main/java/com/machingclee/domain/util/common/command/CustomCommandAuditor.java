@@ -17,6 +17,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 
 /**
@@ -38,6 +39,10 @@ public class CustomCommandAuditor<E extends AuditEvent> implements CommandAudito
 
     public CustomCommandAuditor(AuditEventRepository<E> eventRepository, Supplier<E> eventFactory) {
         this(eventRepository, eventFactory, new AuditConfiguration(), null);
+
+
+
+        var srv = Executors.newThreadPerTaskExecutor();
     }
 
     public CustomCommandAuditor(AuditEventRepository<E> eventRepository, Supplier<E> eventFactory,

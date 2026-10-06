@@ -54,6 +54,11 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
     private final List<CommandEventFlowDTO> commandEventFlowList = new ArrayList<>();
     private final Map<String, PolicyDetailDTO> policyDetails = new HashMap<>();
     /**
+     * Event types a policy listens to, keyed by simple name. Used to reflect the
+     * payload schema of events no command emits, which the flow list never sees.
+     */
+    private final Map<String, Class<?>> listenedEventTypes = new LinkedHashMap<>();
+    /**
      * Nested DTO field schemas keyed by readable type name (e.g.
      * BookingScheduledCar.DTO).
      */
@@ -113,6 +118,16 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
                         },
                         (existing, replacement) -> existing,
                         LinkedHashMap::new));
+        // Events no command emits (external events) never pass through the flow
+        // list above, so reflect their payload schema here or the diagram has
+        // nothing to expand for them.
+        for (PolicyDetailDTO policy : policyDetails.values()) {
+            for (PolicyFlowEntryDTO flow : policy.flows()) {
+                if (flow.fromEvent() != null && !schema.containsKey(flow.fromEvent())) {
+                    schema.put(flow.fromEvent(), eventPayloadSchema(flow.fromEvent()));
+                }
+            }
+        }
         return new FlowResponseDTO(
                 new ArrayList<>(commandEventFlowList),
                 new HashMap<>(policyDetails),
@@ -430,8 +445,7 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
                     commandClass.getSimpleName(),
                     EventTypeScanner.buildPayloadSchema(commandClass, dtoRegistry));
             List<InvolvedEntityDTO> involvedEntities = EntityTypeScanner.scanEntityTypes(handler);
-            BoundedContext contextAnnotation = commandClass.getAnnotation(BoundedContext.class);
-            String context = contextAnnotation != null ? contextAnnotation.value() : "";
+            String context = resolveBoundedContext(commandClass);
             Actor actorAnnotation = commandClass.getAnnotation(Actor.class);
             List<String> actors = actorAnnotation != null
                     ? List.of(actorAnnotation.value())
@@ -482,9 +496,15 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
 
                 Class<?>[] paramTypes = method.getParameterTypes();
                 Class<?> firstParam = paramTypes.length > 0 ? paramTypes[0] : null;
-                String fromEvent = (firstParam != null && firstParam != ToBeArrangedEvent.class)
-                        ? firstParam.getSimpleName()
-                        : null;
+                boolean listensToEvent = firstParam != null && firstParam != ToBeArrangedEvent.class;
+                String fromEvent = listensToEvent ? firstParam.getSimpleName() : null;
+                if (listensToEvent) {
+                    listenedEventTypes.putIfAbsent(fromEvent, firstParam);
+                }
+                // The event's own context. Only matters for events no command emits
+                // (external events): the visualizer uses it to draw their bounding box,
+                // since they have no command to inherit one from.
+                String fromEventContext = listensToEvent ? resolveBoundedContext(firstParam) : "";
                 String invariant = (invariantAnnotation != null && invariantAnnotation.value().length > 0)
                         ? stripCommonLeadingWhitespace(invariantAnnotation.value()[0])
                         : null;
@@ -497,10 +517,10 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
                                     "A policy must dispatch exactly one command (DDD rule).");
                 }
                 if (nextCommands.isEmpty()) {
-                    flows.add(new PolicyFlowEntryDTO(fromEvent, null, invariant));
+                    flows.add(new PolicyFlowEntryDTO(fromEvent, null, invariant, fromEventContext));
                 } else {
                     for (Class<?> cmd : nextCommands) {
-                        flows.add(new PolicyFlowEntryDTO(fromEvent, cmd.getSimpleName(), invariant));
+                        flows.add(new PolicyFlowEntryDTO(fromEvent, cmd.getSimpleName(), invariant, fromEventContext));
                     }
                 }
             }
@@ -508,6 +528,38 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
             logger.info("Auto-detected policy flows for {}: {}", policyName, flows);
             policyDetails.put(policyName, new PolicyDetailDTO(flows));
         }
+    }
+
+    /**
+     * Payload schema of an event known only through a policy listener, reflected
+     * the same way command-emitted events are. Empty when the type was not seen.
+     */
+    private Map<String, Object> eventPayloadSchema(String eventName) {
+        Class<?> eventType = listenedEventTypes.get(eventName);
+        if (eventType == null) {
+            return Map.of();
+        }
+        return EventTypeScanner.buildPayloadSchema(eventType, dtoRegistry);
+    }
+
+    /**
+     * {@code @BoundedContext} on the type, falling back to its package.
+     * Returns "" when neither is present, matching the command-flow convention
+     * (callers that want a "default" bucket decide that themselves).
+     */
+    private static String resolveBoundedContext(Class<?> type) {
+        BoundedContext onClass = type.getAnnotation(BoundedContext.class);
+        if (onClass != null && !onClass.value().isBlank()) {
+            return onClass.value().trim();
+        }
+        Package pkg = type.getPackage();
+        if (pkg != null) {
+            BoundedContext onPkg = pkg.getAnnotation(BoundedContext.class);
+            if (onPkg != null && !onPkg.value().isBlank()) {
+                return onPkg.value().trim();
+            }
+        }
+        return "";
     }
 
     private Class<?> extractCommandClass(CommandHandler<?, ?> handler) {

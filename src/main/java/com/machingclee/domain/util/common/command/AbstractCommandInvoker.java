@@ -8,6 +8,7 @@ import com.machingclee.domain.util.common.audit.AuditConfiguration;
 import com.machingclee.domain.util.common.bytecodescanner.ControllerCommandScanner;
 import com.machingclee.domain.util.common.bytecodescanner.EntityTypeScanner;
 import com.machingclee.domain.util.common.bytecodescanner.EventTypeScanner;
+import com.machingclee.domain.util.common.bytecodescanner.ExternalEventScanner;
 import com.machingclee.domain.util.common.bytecodescanner.PolicyCommandScanner;
 import com.machingclee.domain.util.common.dto.*;
 import com.machingclee.domain.util.common.event.SmartEventQueue;
@@ -58,6 +59,12 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
      * payload schema of events no command emits, which the flow list never sees.
      */
     private final Map<String, Class<?>> listenedEventTypes = new LinkedHashMap<>();
+    /**
+     * Event types handed to {@link com.machingclee.domain.util.common.event.ExternalEventPublisher},
+     * keyed by simple name. A published event is the start of a chain, so it has
+     * to be listed even when no policy listens to it yet.
+     */
+    private final Map<String, Class<?>> publishedEventTypes = new LinkedHashMap<>();
     /**
      * Nested DTO field schemas keyed by readable type name (e.g.
      * BookingScheduledCar.DTO).
@@ -120,7 +127,13 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
                         LinkedHashMap::new));
         // Events no command emits (external events) never pass through the flow
         // list above, so reflect their payload schema here or the diagram has
-        // nothing to expand for them.
+        // nothing to expand for them. Published events come first: a publish is
+        // what makes an event external, whether or not a policy listens yet.
+        for (String eventName : publishedEventTypes.keySet()) {
+            if (!schema.containsKey(eventName)) {
+                schema.put(eventName, eventPayloadSchema(eventName));
+            }
+        }
         for (PolicyDetailDTO policy : policyDetails.values()) {
             for (PolicyFlowEntryDTO flow : policy.flows()) {
                 if (flow.fromEvent() != null && !schema.containsKey(flow.fromEvent())) {
@@ -475,8 +488,39 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
             logger.info("Auto-detected entities for {}: {}", commandClass.getSimpleName(), involvedEntities);
         }
 
+        // Before the policy flows: a published event is added as its own flow
+        // there, and that only sees events already recorded.
+        scanPublishedEvents();
         buildPolicyFlows(policies);
         return map;
+    }
+
+    /**
+     * Events published through {@code ExternalEventPublisher} start a chain
+     * rather than coming out of a command, so {@link EventTypeScanner} never
+     * sees them. Record them here. A policy that listens to one already carries
+     * it as {@code fromEvent}; this is what lists the ones nothing listens to
+     * yet, and what gives every published event its payload schema.
+     */
+    private void scanPublishedEvents() {
+        for (String beanName : context.getBeanDefinitionNames()) {
+            Class<?> type;
+            try {
+                type = context.getType(beanName);
+            } catch (RuntimeException e) {
+                continue;
+            }
+            if (type == null || !ExternalEventScanner.referencesPublisher(type)) {
+                continue;
+            }
+            for (Class<?> eventType : ExternalEventScanner.scan(type)) {
+                publishedEventTypes.putIfAbsent(eventType.getSimpleName(), eventType);
+            }
+        }
+        if (!publishedEventTypes.isEmpty()) {
+            logger.info("[{}] Auto-detected {} externally published event(s): {}",
+                    getClass().getSimpleName(), publishedEventTypes.size(), publishedEventTypes.keySet());
+        }
     }
 
     private void buildPolicyFlows(List<Policy> policies) {
@@ -528,6 +572,63 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
             logger.info("Auto-detected policy flows for {}: {}", policyName, flows);
             policyDetails.put(policyName, new PolicyDetailDTO(flows));
         }
+        addPublishedEventFlows();
+    }
+
+    /**
+     * Makes sure every externally published event shows on the diagram.
+     * <p>
+     * The visualizer only draws an external event from a policy flow's
+     * {@code fromEvent} plus {@code fromEventContext}. An event a policy already
+     * listens to is named there, but only when that listener declared an
+     * invariant — so a published event is written onto the first policy that
+     * hears it. One that nothing listens to yet gets a single flow of its own,
+     * under {@code ExternalEventPublisher}, since there is no policy to hang it
+     * on. Either way the context is the event's own {@code @BoundedContext};
+     * without one the diagram has no box to put it in.
+     */
+    private void addPublishedEventFlows() {
+        if (publishedEventTypes.isEmpty()) {
+            return;
+        }
+        List<PolicyFlowEntryDTO> unheard = new ArrayList<>();
+        for (Class<?> eventType : publishedEventTypes.values()) {
+            String name = eventType.getSimpleName();
+            String context = resolveBoundedContext(eventType);
+            if (context.isEmpty()) {
+                logger.info("Externally published event {} has no @BoundedContext, so the diagram "
+                        + "cannot place it", name);
+            }
+            String policy = policyListeningTo(name);
+            if (policy == null) {
+                unheard.add(new PolicyFlowEntryDTO(name, null, null, context));
+                continue;
+            }
+            List<PolicyFlowEntryDTO> flows = new ArrayList<>(policyDetails.get(policy).flows());
+            for (int i = 0; i < flows.size(); i++) {
+                PolicyFlowEntryDTO flow = flows.get(i);
+                if (name.equals(flow.fromEvent()) && flow.fromEventContext().isEmpty()) {
+                    flows.set(i, new PolicyFlowEntryDTO(
+                            flow.fromEvent(), flow.toCommand(), flow.invariant(), context));
+                }
+            }
+            policyDetails.put(policy, new PolicyDetailDTO(flows));
+        }
+        if (!unheard.isEmpty()) {
+            policyDetails.put("ExternalEventPublisher", new PolicyDetailDTO(unheard));
+        }
+    }
+
+    /** Name of the first policy with a flow that starts from {@code eventName}. */
+    private String policyListeningTo(String eventName) {
+        for (Map.Entry<String, PolicyDetailDTO> entry : policyDetails.entrySet()) {
+            for (PolicyFlowEntryDTO flow : entry.getValue().flows()) {
+                if (eventName.equals(flow.fromEvent())) {
+                    return entry.getKey();
+                }
+            }
+        }
+        return null;
     }
 
     /**
@@ -535,7 +636,10 @@ public abstract class AbstractCommandInvoker<E extends AuditEvent> implements Co
      * the same way command-emitted events are. Empty when the type was not seen.
      */
     private Map<String, Object> eventPayloadSchema(String eventName) {
-        Class<?> eventType = listenedEventTypes.get(eventName);
+        Class<?> eventType = publishedEventTypes.get(eventName);
+        if (eventType == null) {
+            eventType = listenedEventTypes.get(eventName);
+        }
         if (eventType == null) {
             return Map.of();
         }

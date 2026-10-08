@@ -39,10 +39,7 @@ public class CustomCommandAuditor<E extends AuditEvent> implements CommandAudito
 
     public CustomCommandAuditor(AuditEventRepository<E> eventRepository, Supplier<E> eventFactory) {
         this(eventRepository, eventFactory, new AuditConfiguration(), null);
-
-
-
-        var srv = Executors.newThreadPerTaskExecutor();
+        // var srv = Executors.newThreadPerTaskExecutor();
     }
 
     public CustomCommandAuditor(AuditEventRepository<E> eventRepository, Supplier<E> eventFactory,
